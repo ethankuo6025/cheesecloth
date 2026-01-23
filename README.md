@@ -1,13 +1,10 @@
 # cheesecloth
-Stock screener utilizing the XBRL SEC API. 
-
+Stock screener utilizing the XBRL SEC API.
+  
 ## Roadmap
 ### Core Functionality
-- PostgreSQL database
-- 
-
-### Data Analysis
-- SQL/Python scripts to find patterns in your schedule
-- Prebuilt SQL queries to generate reports/key metrics
-- Metabase Integration
-
+- data ingestion through API
+- clean and process data
+- write info into PostgreSQL database
+- track time frame that is uploaded to SQL 
+- SQL scripts to find tickers that fit certain criteria
