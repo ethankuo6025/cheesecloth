@@ -1,3 +1,4 @@
 *.ipynb
 personal_header.py
 __pycache__
+private.py
