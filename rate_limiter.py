@@ -7,9 +7,15 @@ import threading
 _lock = threading.Lock()
 _NEXT_ALLOWED = 0.0
 MIN_INTERVAL = .125 # 8 requests/sec
+_COUNT = 0
+
+def call_count():
+    return f"api calls: {_COUNT}"
 
 def wait():
     global _NEXT_ALLOWED
+    global _COUNT
+    _COUNT += 1
     with _lock:
         now = monotonic()
         if now < _NEXT_ALLOWED:
