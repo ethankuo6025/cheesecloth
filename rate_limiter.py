@@ -2,10 +2,20 @@ from optparse import OptionParser
 from typing import Any
 from time import sleep, monotonic
 from arelle.utils.PluginHooks import PluginHooks
+import threading
 
+_lock = threading.Lock()
 _NEXT_ALLOWED = 0.0
-
 MIN_INTERVAL = .125 # 8 requests/sec
+
+def wait():
+    global _NEXT_ALLOWED
+    with _lock:
+        now = monotonic()
+        if now < _NEXT_ALLOWED:
+            sleep(_NEXT_ALLOWED - now)
+        _NEXT_ALLOWED = monotonic() + MIN_INTERVAL
+    return True
 
 class RateLimiter(PluginHooks):
     @staticmethod
@@ -17,17 +27,11 @@ class RateLimiter(PluginHooks):
         **kwargs: Any
     ) -> tuple[str | None, bool]:
         
-        global _NEXT_ALLOWED
-
         if not url:
             return (None, False)
-        
-        now = monotonic()
-        if now < _NEXT_ALLOWED:
-            sleep(_NEXT_ALLOWED-now)
-        
-        _NEXT_ALLOWED = now + MIN_INTERVAL
 
+        wait()
+        
         return(url, False)
 
 __pluginInfo__ = {
