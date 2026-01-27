@@ -31,8 +31,8 @@ class RateLimiter(PluginHooks):
         return(url, False)
 
 __pluginInfo__ = {
-    'name': 'Rate Limiter Plugin',
-    'version': '1.0.0',
-    'author': 'Ethan Kuo',
-    'WebCache.TransformURL': RateLimiter.TransformURLOptions,
+    "name": "Rate Limiter Plugin",
+    "version": "1.0.0",
+    "author": "Ethan Kuo",
+    "WebCache.TransformURL": RateLimiter.TransformURLOptions,
 }
