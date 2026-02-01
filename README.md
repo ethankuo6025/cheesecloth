@@ -5,6 +5,9 @@ Stock screener utilizing the XBRL SEC API.
 ### Core Functionality
 - data ingestion through API
 - clean and process data
+
+### Next Up
+- skip filings that have already been processed
 - write info into PostgreSQL database
 - track time frame that is uploaded to SQL 
 - SQL scripts to find tickers that fit certain criteria
