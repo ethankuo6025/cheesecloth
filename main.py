@@ -1,10 +1,9 @@
-# main.py
-import asyncio
 import logging
 
 from parser import SECFilingParser
 from store import store_facts
-
+import selectors
+import asyncio
 
 async def parse_and_store(
     parser: SECFilingParser,
@@ -28,7 +27,7 @@ async def main():
     with SECFilingParser(max_retries=3, timeout=30.0) as parser:
         upserted, failed = await parse_and_store(
             parser,
-            ticker="NVDA",
+            ticker="GOOG",
             filing_types="10-K",
             max_filings=1,
         )
@@ -36,4 +35,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(
+        main(),
+        loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()),
+    )
