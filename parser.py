@@ -76,7 +76,7 @@ class SECFilingParser:
 
     def _get_json(self, url: str) -> Any:
         """get json from a url with rate limiting."""
-        rate_limiter.wait()
+        rate_limiter.wait(url)
         try:
             r = self._client.get(url)
             r.raise_for_status()
@@ -259,7 +259,6 @@ class SECFilingParser:
         ticker: str,
         filing_types: str | set[str] = "10-K",
         max_filings: int | None = None,
-        arelle_plugins: str = "ixbrl-viewer",
     ) -> list[ParsedFact]:
         """
         parse filings for a ticker. filing_types can be a single type like "10-k"
@@ -289,7 +288,7 @@ class SECFilingParser:
                 keepOpen=True,
                 logFile="logToStructuredMessage",
                 logFormat="[%(messageCode)s] %(message)s - %(file)s",
-                plugins=arelle_plugins,
+                plugins="C:/Program Files/Arelle/plugin/EDGAR/transform/__init__.py|rate_limiter.py"
             )
 
             try:
