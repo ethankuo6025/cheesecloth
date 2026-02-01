@@ -41,48 +41,69 @@ class TickerNotFoundError(SECFilingParserError):
     pass
 
 class FilingFetchError(SECFilingParserError):
-    """thrown by _fetch-json on HTTP issues."""
+    """thrown by _get_json() on HTTP issues."""
     pass
 
 class SECFilingParser:
-    """parses XBRL facts from SEC EDGAR 10-K filings."""
+    """parses XBRL facts from SEC EDGAR filings. (defaults to 10-Ks)"""
 
-    def __init__(self):
+    def __init__(self, max_retries: int = 3, timeout: float = 30.0):
         self._ticker_to_cik: dict[str, str] | None = None
+        self._client = httpx.Client(
+            timeout=timeout,
+            headers=headers,
+            follow_redirects=True,
+            transport=httpx.HTTPTransport(retries=max_retries),
+        )
 
-    def _fetch_json(self, url: str) -> dict:
-        """fetch JSON from a URL with rate limiting."""
+    def close(self) -> None:
+        self._client.close()
+
+    def __enter__(self) -> "SECFilingParser":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+    def _get_json(self, url: str) -> dict:
+        """get JSON from a URL with rate limiting."""
         rate_limiter.wait()
         try:
-            with httpx.Client(timeout=30.0, headers=headers, follow_redirects=True) as client:
-                r = client.get(url)
-                r.raise_for_status()
-                return r.json()
+            r = self._client.get(url)
+            r.raise_for_status()
+            return r.json()
         except httpx.HTTPError as e:
-            raise FilingFetchError(f"Failed to fetch JSON from {url}: {e}") from e
+            raise FilingFetchError(f"Request failed for {url}: {e}") from e
 
     def _get_ticker_to_cik(self) -> dict[str, str]:
         """fetch and cache ticker-to-cik mapping."""
         if self._ticker_to_cik is not None:
             return self._ticker_to_cik
 
-        tickers_json = self._fetch_json("https://www.sec.gov/files/company_tickers.json")
-        self._ticker_to_cik = {ticker["ticker"]: str(ticker["cik_str"]).zfill(10) for ticker in tickers_json.values()}
+        data = self._get_json("https://www.sec.gov/files/company_tickers.json")
+        self._ticker_to_cik = {
+            e["ticker"].upper(): str(e["cik_str"]).zfill(10)
+            for e in data.values()
+            if isinstance(e, dict) and "ticker" in e and "cik_str" in e
+        }
         return self._ticker_to_cik
 
     def _get_cik(self, ticker: str) -> str:
-        """Get CIK for a ticker."""
+        """get CIK for a ticker."""
         mapping = self._get_ticker_to_cik()
         t = ticker.upper()
         if t not in mapping:
             raise TickerNotFoundError(f"Ticker '{ticker}' not found")
         return mapping[t]
 
-    def _get_10k_filings(self, cik: str, max_filings: int | None = None) -> list[tuple[str, str]]:
-        """get list of (accession_number, filename) for 10-K filings."""
-
-        url = f"https://data.sec.gov/submissions/CIK{cik}.json"
-        meta = self._fetch_json(url)
+    def _get_filings(
+        self,
+        cik: str,
+        filing_types: set[str],
+        max_filings: int | None = None,
+    ) -> list[tuple[str, str, str]]:
+        """Get list of (accession_number, filename, filing_type) for specified filing types."""
+        meta = self._get_json(f"https://data.sec.gov/submissions/CIK{cik}.json")
 
         try:
             recent = meta["filings"]["recent"]
@@ -100,11 +121,15 @@ class SECFilingParser:
                 f"Mismatched array lengths: acc={len(acc)}, docs={len(docs)}, descs={len(descs)}"
             )
 
-        ten_ks = [(a, d) for a, d, desc in zip(acc, docs, descs) if desc == "10-K"]
-        return ten_ks[:max_filings] if max_filings else ten_ks
+        filings = [
+            (a, d, desc)
+            for a, d, desc in zip(acc, docs, descs)
+            if desc in filing_types
+        ]
+        return filings[:max_filings] if max_filings else filings
 
     def _parse_fact(self, fact, ticker: str, cik: str, accession_number: str) -> ParsedFact:
-        """Parse a single Arelle fact into a ParsedFact. Raises SECFilingParserError on problems."""
+        """Parse a single Arelle fact into a ParsedFact."""
 
         # QName
         concept = getattr(fact, "concept", None)
@@ -137,7 +162,7 @@ class SECFilingParser:
             except (ValueError, TypeError):
                 pass
 
-        # unitRef
+        # unit
         unit_str = None
         unit_obj = getattr(fact, "unit", None)
         if unit_obj is not None:
@@ -152,7 +177,7 @@ class SECFilingParser:
             except Exception:
                 unit_str = str(unit_obj)
 
-        # --- context: period + dimensions ---
+        # context: period + dimensions
         ctx = getattr(fact, "context", None)
         if ctx is None:
             raise SECFilingParserError(f"Fact has no context: {qname_str}")
@@ -222,37 +247,37 @@ class SECFilingParser:
             dimensions=dimensions,
         )
 
-    def parse_10k_filings(
+    def parse_filings(
         self,
         ticker: str,
+        filing_types: str | set[str] = "10-K",
         max_filings: int | None = None,
         arelle_plugins: str = "ixbrl-viewer",
         verbose: bool = True,
     ) -> list[ParsedFact]:
         """
-        Main entry point. Parses 10-K filings for a ticker and returns all XBRL facts.
-
-        Raises:
-          - TickerNotFoundError: invalid ticker
-          - FilingFetchError: network/HTTP failures fetching SEC JSON
-          - SECFilingParserError: unexpected SEC schema or parsing errors
+        parse filings for a ticker. filing_types can be a single type like "10-K"
+        or a set like {"10-K", "10-Q"}. returns all XBRL facts from matching filings.
         """
+        if isinstance(filing_types, str):
+            filing_types = {filing_types}
+
         ticker = ticker.upper()
         cik = self._get_cik(ticker)
-        filings = self._get_10k_filings(cik, max_filings)
+        filings = self._get_filings(cik, filing_types, max_filings)
 
         if not filings:
             if verbose:
-                print(f"No 10-K filings found for {ticker}")
+                print(f"No {filing_types} filings found for {ticker}")
             return []
 
         all_facts: list[ParsedFact] = []
 
-        for i, (acc_num, filename) in enumerate(filings):
+        for i, (acc_num, filename, ftype) in enumerate(filings):
             acc_nd = acc_num.replace("-", "")
             url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_nd}/{filename}"
             if verbose:
-                print(f"[{i+1}/{len(filings)}] {acc_num}")
+                print(f"[{i+1}/{len(filings)}] {ftype} {acc_num}")
 
             options = RuntimeOptions(
                 entrypointFile=url,
@@ -290,6 +315,8 @@ class SECFilingParser:
 
         return all_facts
 
+
 if __name__ == "__main__":
-    parser = SECFilingParser()
-    facts = parser.parse_10k_filings("NVDA", max_filings=1, verbose=True)
+    with SECFilingParser(max_retries=3, timeout=30.0) as parser:
+        facts = parser.parse_filings("NVDA", filing_types="10-K", max_filings=1, verbose=True)
+        print("Total parsed facts:", len(facts))
