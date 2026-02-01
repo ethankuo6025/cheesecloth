@@ -15,13 +15,14 @@ def get_connection(db_name=DB_NAME):
         conn = psycopg.connect(
             host=DB_HOST,
             port=DB_PORT,
-            database=db_name,
+            dbname=db_name,
             user=DB_USER,
             password=DB_PASSWORD,
         )
         return conn
     except Error as e:
-        return None
+        print(f"Connection error (db={db_name}, host={DB_HOST}, port={DB_PORT}, user={DB_USER}): {e}")
+        raise
 
 
 @contextmanager
