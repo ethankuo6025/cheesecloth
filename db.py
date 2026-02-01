@@ -1,5 +1,7 @@
 import psycopg
 from psycopg import Error
+from typing import cast
+from psycopg.abc import Query
 from contextlib import contextmanager
 import os
 
@@ -102,7 +104,7 @@ def init_schema():
         try:
             conn.autocommit = True
             with conn.cursor() as cursor:
-                cursor.execute(ddl_sql)
+                cursor.execute(cast(Query, ddl_sql))
             return(0, SUCCESSFUL)
         finally:
             conn.close()
