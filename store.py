@@ -15,7 +15,10 @@ CONNINFO = f"host={DB_HOST} port={DB_PORT} dbname={DB_NAME} user={DB_USER} passw
 
 
 def compute_fact_hash(f: ParsedFact) -> str:
+    """unique identity for deduplication"""
     dims = json.dumps(f.dimensions, sort_keys=True, separators=(",", ":"))
+
+    # excludes value/decimals/precision
     data = (
         f"{f.cik}|{f.accession_number}|"
         f"{f.namespace}|{f.qname}|{f.local_name}|"
@@ -30,6 +33,7 @@ async def store_facts(
     facts: list[ParsedFact],
     batch_size: int = 500,
 ) -> tuple[int, int]:
+    """store facts with deduplication"""
     if not facts:
         return 0, 0
 
@@ -85,12 +89,12 @@ async def store_facts(
                                     fact.unit,
                                     fact.decimals,
                                     fact.precision,
-                                    json.dumps(fact.dimensions, sort_keys=True, separators=(",", ":")),
+                                    json.dumps(fact.dimensions, sort_keys=True, separators=(",", ":"))
                                 )
                             )
                         except Exception as e:
                             failed += 1
-                            logger.info("Error preparing %s: %s", fact.qname, e)
+                            logger.info("Error inserting %s: %s", fact.qname, e)
 
                     if params:
                         try:
