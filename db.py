@@ -1,10 +1,12 @@
+import sys
+import os
 import psycopg
 from psycopg import Error, sql
 from typing import cast
 from psycopg.abc import Query
 from contextlib import contextmanager
 from dotenv import load_dotenv
-import os
+
 load_dotenv()
 
 DB_HOST = os.getenv("DB_HOST")
@@ -113,15 +115,39 @@ def init_schema():
     except Error as e:
         return(1, f"Error initializing cheesecloth schema: {e}")
 
-def setup_database():
+def setup_database(db_name):
     """full database setup: create database and initialize/update schema."""
-    code, msg = create_database(DB_NAME)
+    code, msg = create_database(db_name)
     if code == 0:
         print(msg)
         code, msg = init_schema()
     print(msg)
     return code
 
-if __name__ == "__main__":
-    code = setup_database()
-    print(f"exit code: {code}")
+def reset_database(db_name):
+    """drops ALL tables and recreate. WARNING: Deletes all data!"""
+    try:
+        conn = get_connection()
+        if conn is None:
+            return False
+        
+        conn.autocommit = True
+        with conn.cursor() as cursor:
+            cursor.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(db_name)))
+        conn.close()
+        print("All tables dropped.")
+        return init_schema()
+    except Error as e:
+        print(f"Error resetting database: {e}")
+        return False
+
+if __name__ == "__main__":    
+    if len(sys.argv) > 1 and sys.argv[1] == "--reset":
+        confirm = input("This will DELETE ALL DATA. Type 'yes I understand' to confirm: ")
+        if confirm == 'yes I understand':
+            if create_database(DB_NAME):
+                reset_database(DB_NAME)
+        else:
+            print("Incorrect response: operation cancelled.")
+    else:
+        setup_database(DB_NAME)

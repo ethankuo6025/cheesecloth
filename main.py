@@ -27,7 +27,7 @@ async def main():
     with SECFilingParser(max_retries=3, timeout=30.0) as parser:
         upserted, failed = await parse_and_store(
             parser,
-            ticker="GOOG",
+            ticker="HOOD",
             filing_types="10-K",
             max_filings=1,
         )
