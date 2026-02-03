@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS companies (
 
 CREATE TABLE IF NOT EXISTS facts (
     id BIGSERIAL PRIMARY KEY,
-    fact_hash VARCHAR(32) NOT NULL UNIQUE,
+    fact_hash VARCHAR(64) NOT NULL UNIQUE,
     company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     accession_number VARCHAR(25) NOT NULL,
     qname VARCHAR(300) NOT NULL,
