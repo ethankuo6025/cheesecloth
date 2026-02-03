@@ -36,6 +36,18 @@ class ParsedFact:
     precision: int | None = None
     dimensions: dict[str, str] = field(default_factory=dict)
 
+def _is_quantitative(parsed: ParsedFact) -> bool:
+    """return True only if the fact has a unit and a numeric value."""
+    if parsed.unit is None:
+        return False
+    if parsed.value is None:
+        return False
+    try:
+        float(parsed.value.replace(",", ""))
+    except (ValueError, AttributeError):
+        return False    
+    return True
+
 class SECFilingParserError(Exception):
     pass
 
@@ -302,8 +314,10 @@ class SECFilingParser:
                     count = 0
                     for fact in facts:
                         try:
-                            all_facts.append(self._parse_fact(fact, ticker, cik, acc_num))
-                            count += 1
+                            parsed = self._parse_fact(fact, ticker, cik, acc_num)
+                            if _is_quantitative(parsed):
+                                all_facts.append(parsed)
+                                count += 1
                         except SECFilingParserError as e:
                             logger.debug("skip fact: %s", e)
 
