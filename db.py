@@ -136,7 +136,7 @@ def reset_database(db_name):
             cursor.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(db_name)))
         conn.close()
         print("All tables dropped.")
-        return init_schema()
+        return setup_database(db_name)
     except Error as e:
         print(f"Error resetting database: {e}")
         return False
