@@ -127,7 +127,7 @@ def setup_database(db_name):
 def reset_database(db_name):
     """drops ALL tables and recreate. WARNING: Deletes all data!"""
     try:
-        conn = get_connection()
+        conn = get_connection("postgres")
         if conn is None:
             return False
         

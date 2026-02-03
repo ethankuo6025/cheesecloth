@@ -1,4 +1,4 @@
 *.ipynb
 personal_header.py
 __pycache__
-*.env
+.env
