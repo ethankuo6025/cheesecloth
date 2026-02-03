@@ -6,10 +6,19 @@ import logging
 
 from psycopg import AsyncConnection
 
-from private import DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
+from dotenv import load_dotenv
+import os
 from parser import ParsedFact
 
 logger = logging.getLogger(__name__)
+
+load_dotenv()
+
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT")
+DB_NAME = os.getenv("DB_NAME")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 CONNINFO = f"host={DB_HOST} port={DB_PORT} dbname={DB_NAME} user={DB_USER} password={DB_PASSWORD}"
 
@@ -27,6 +36,28 @@ def compute_fact_hash(f: ParsedFact) -> str:
         f"{dims}"
     )
     return hashlib.sha256(data.encode("utf-8")).hexdigest()[:32]
+
+
+def resolve_keep_higher(stored: int | None, incoming: int | None) -> int | None:
+    """mirrors the CASE logic in the ON CONFLICT for decimals/precision."""
+    if incoming is None:
+        return stored
+    if stored is None:
+        return incoming
+    return incoming if incoming > stored else stored
+
+
+def would_update(stored: tuple, incoming: tuple) -> bool:
+    """return True if the ON CONFLICT SET would actually change any column."""
+    s_val, s_dec, s_prec = stored
+    i_val, i_dec, i_prec = incoming
+    if s_val != i_val:
+        return True
+    if resolve_keep_higher(s_dec, i_dec) != s_dec:
+        return True
+    if resolve_keep_higher(s_prec, i_prec) != s_prec:
+        return True
+    return False
 
 
 async def store_facts(
@@ -70,9 +101,11 @@ async def store_facts(
                         company_cache[tkr] = row[0]
 
                     params: list[tuple] = []
+                    hashes: list[str] = []
                     for fact in batch:
                         try:
                             fact_hash = compute_fact_hash(fact)
+                            hashes.append(fact_hash)
                             params.append(
                                 (
                                     fact_hash,
@@ -98,6 +131,22 @@ async def store_facts(
 
                     if params:
                         try:
+                            await cur.execute(
+                                "SELECT fact_hash, value, decimals, precision FROM facts WHERE fact_hash = ANY(%s)", 
+                                (hashes,)
+                            )
+                            # build lookup of hash -> (value, decimals, precision)
+                            existing: dict[str, tuple] = {}
+                            async for row in cur: # cur is async so for loop needs to be too
+                                existing[row[0]] = (row[1], row[2], row[3])
+
+                            # drop anything already in the db that wouldn't actually change
+                            params = [
+                                p for p in params
+                                if p[0] not in existing
+                                or would_update(existing[p[0]], (p[7], p[12], p[13]))
+                            ] # use values, decimals, and precision
+
                             await cur.executemany(
                                 """
                                 INSERT INTO facts (
