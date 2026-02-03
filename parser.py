@@ -14,7 +14,6 @@ from arelle.RuntimeOptions import RuntimeOptions
 from personal_header import header
 logger = logging.getLogger(__name__)
 
-
 class PeriodType(Enum):
     INSTANT = "instant"
     DURATION = "duration"
@@ -44,7 +43,6 @@ class TickerNotFoundError(SECFilingParserError):
     """thrown by _get_cik() on invalid tickers."""
     pass
 
-
 class FilingFetchError(SECFilingParserError):
     """thrown by _get_json() on http issues."""
     pass
@@ -68,11 +66,13 @@ class SECFilingParser:
     def close(self) -> None:
         self._client.close()
 
+    # needed for the with SECFilingParser() as parser
     def __enter__(self) -> "SECFilingParser":
         return self
 
     def __exit__(self, *exc) -> None:
         self.close()
+
 
     def _get_json(self, url: str) -> Any:
         """get json from a url with rate limiting."""

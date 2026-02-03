@@ -59,7 +59,7 @@ def test_connection(db_name=DB_NAME):
 
 
 def create_database():
-    """Create the database if it doesn't exist. Returns True if exists or created."""
+    """create the database if it doesn't exist. Returns True if exists or created."""
     ALREADY_EXISTS = "cheesecloth database already exists."
     SUCCESSFUL = "cheesecloth database has been setup successfully."
     conn = None
@@ -85,7 +85,7 @@ def create_database():
 
 
 def init_schema():
-    """Initialize/update the database schema from ddl.sql."""
+    """initialize/update the database schema from ddl.sql."""
     SUCCESSFUL = "initializing the schema completed successfully."
 
     ddl_path = os.path.join(os.path.dirname(__file__), "ddl.sql")
@@ -113,7 +113,7 @@ def init_schema():
         return(1, f"Error initializing cheesecloth schema: {e}")
 
 def setup_database():
-    """Full database setup: create database and initialize/update schema."""
+    """full database setup: create database and initialize/update schema."""
     code, msg = create_database()
     if code == 0:
         print(msg)
