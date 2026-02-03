@@ -1,16 +1,17 @@
 import psycopg
-from psycopg import Error
+from psycopg import Error, sql
 from typing import cast
 from psycopg.abc import Query
 from contextlib import contextmanager
+from dotenv import load_dotenv
 import os
+load_dotenv()
 
-try:
-    from private import DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
-except ImportError as e:
-    print(f"private.py not found or setup incorrectly: {e}")
-    exit(1)
-
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT")
+DB_NAME = os.getenv("DB_NAME")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 def get_connection(db_name=DB_NAME):
     try:
@@ -58,7 +59,7 @@ def test_connection(db_name=DB_NAME):
     return False
 
 
-def create_database():
+def create_database(db_name):
     """create the database if it doesn't exist. Returns True if exists or created."""
     ALREADY_EXISTS = "cheesecloth database already exists."
     SUCCESSFUL = "cheesecloth database has been setup successfully."
@@ -75,7 +76,7 @@ def create_database():
             )
             if cursor.fetchone():
                 return(-1, ALREADY_EXISTS)
-            cursor.execute(f'CREATE DATABASE "{DB_NAME}"')
+            cursor.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(db_name)))
         return(0, SUCCESSFUL)
     except Error as e:
         return(1, f"Error creating database: {e}")
@@ -114,7 +115,7 @@ def init_schema():
 
 def setup_database():
     """full database setup: create database and initialize/update schema."""
-    code, msg = create_database()
+    code, msg = create_database(DB_NAME)
     if code == 0:
         print(msg)
         code, msg = init_schema()
