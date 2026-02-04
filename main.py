@@ -12,13 +12,13 @@ async def parse_and_store(
     max_filings: int | None = None,
     batch_size: int = 500,
 ) -> tuple[int, int]:
-    facts = await asyncio.to_thread(
+    filings, facts = await asyncio.to_thread(
         parser.parse_filings,
         ticker,
         filing_types=filing_types,
         max_filings=max_filings,
     )
-    return await store_facts(facts, batch_size=batch_size)
+    return await store_facts(filings, facts, batch_size=batch_size)
 
 
 async def main():
@@ -29,7 +29,6 @@ async def main():
             parser,
             ticker="HOOD",
             filing_types="10-K",
-            max_filings=1,
         )
     print(f"\nDone: {upserted} upserted, {failed} failed")
 

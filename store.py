@@ -8,7 +8,7 @@ from psycopg import AsyncConnection
 
 from dotenv import load_dotenv
 import os
-from parser import ParsedFact
+from parser import ParsedFact, Filing
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,7 @@ def would_update(stored: tuple, incoming: tuple) -> bool:
 
 
 async def store_facts(
+    filings: list[Filing],
     facts: list[ParsedFact],
     batch_size: int = 500,
 ) -> tuple[int, int]:
@@ -69,37 +70,34 @@ async def store_facts(
         return 0, 0
 
     upserted = failed = 0
-    company_cache: dict[str, int] = {}
 
     async with await AsyncConnection.connect(CONNINFO) as conn:
-        tickers = list({f.ticker for f in facts})
+        cik = facts[0].cik
+        ticker = facts[0].ticker
+        filing_params = [(filing.cik, filing.accession_number) for filing in filings]
+        
         async with conn.cursor() as cur:
-            await cur.execute("SELECT ticker, id FROM companies WHERE ticker = ANY(%s)", (tickers,))
-            async for row in cur:
-                company_cache[row[0]] = row[1]
+            # insert parsed filings into database
+            await cur.executemany(
+                "INSERT INTO filings (cik, accession_number) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                filing_params
+            )
+            await cur.execute("SELECT 1 FROM companies WHERE cik = %s", (cik,))
+            company_exists = await cur.fetchall()
 
         for i in range(0, len(facts), batch_size):
             batch = facts[i : i + batch_size]
 
             async with conn.transaction():
                 async with conn.cursor() as cur:
-                    missing = {f.ticker: f.cik for f in batch if f.ticker not in company_cache}
-                    for tkr, cik in missing.items():
+                    if not company_exists:
                         await cur.execute(
                             """
-                            INSERT INTO companies (ticker, cik) VALUES (%s, %s)
-                            ON CONFLICT (ticker) DO UPDATE SET
-                                cik = EXCLUDED.cik,
-                                updated_at = CURRENT_TIMESTAMP
-                            RETURNING id
+                            INSERT INTO companies (cik, ticker) VALUES (%s, %s)
+                              ON CONFLICT (cik) DO NOTHING
                             """,
-                            (tkr, cik),
+                            (cik, ticker),
                         )
-                        row = await cur.fetchone()
-                        if row is None:
-                            raise RuntimeError(f"Failed to upsert company {tkr}")
-                        company_cache[tkr] = row[0]
-
                     params: list[tuple] = []
                     hashes: list[str] = []
                     for fact in batch:
@@ -109,7 +107,7 @@ async def store_facts(
                             params.append(
                                 (
                                     fact_hash,
-                                    company_cache[fact.ticker],
+                                    fact.cik,
                                     fact.accession_number,
                                     fact.qname,
                                     fact.namespace,
@@ -150,7 +148,7 @@ async def store_facts(
                             await cur.executemany(
                                 """
                                 INSERT INTO facts (
-                                    fact_hash, company_id, accession_number, qname, namespace,
+                                    fact_hash, cik, accession_number, qname, namespace,
                                     local_name, period_type, value, instant_date, start_date,
                                     end_date, unit, decimals, precision, dimensions
                                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)

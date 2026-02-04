@@ -47,6 +47,13 @@ class ParsedFact:
     precision: int | None = None
     dimensions: dict[str, str] = field(default_factory=dict)
 
+@dataclass
+class Filing:
+    cik: str
+    accession_number: str
+    primary_file: str
+    filing_type: str
+
 def _is_quantitative(parsed: ParsedFact) -> bool:
     """return True only if the fact has a unit and a numeric value."""
     if parsed.unit is None:
@@ -136,7 +143,7 @@ class SECFilingParser:
         cik: str,
         filing_types: set[str],
         max_filings: int | None = None,
-    ) -> list[tuple[str, str, str]]:
+    ) -> list[Filing]:
         """get list of (accession_number, filename, filing_type) for specified filing types."""
         meta = self._get_json(f"https://data.sec.gov/submissions/CIK{cik}.json")
 
@@ -156,15 +163,17 @@ class SECFilingParser:
                 f"mismatched array lengths: acc={len(acc)}, docs={len(docs)}, forms={len(forms)}"
             )
 
-        filings = [(a, d, f) for a, d, f in zip(acc, docs, forms) if f in filing_types]
+        filings = [Filing(cik=cik, accession_number=a, primary_file=p, filing_type=f) for a, p, f in zip(acc, docs, forms) if f in filing_types]
 
         with Connection.connect(CONNINFO) as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT accession_number FROM filings WHERE cik = %s AND accession_number = ANY(%s)", (cik, acc))
-                already_exists = {row[0] for row in cur.fetchall()}
-                filings = [filing for filing in filings if filing[0] not in already_exists]
-
-        return filings[:max_filings] if max_filings else filings
+                cur.execute("SELECT 1 FROM companies WHERE cik = %s", (cik,))
+                if cur.fetchall() == 1:
+                    cur.execute("SELECT accession_number FROM filings WHERE cik = %s AND accession_number = ANY(%s)", (cik, acc))
+                    already_exists = {row[0] for row in cur.fetchall()}
+                    filings = [filing for filing in filings if filing.accession_number not in already_exists]
+                
+        return filings[:max_filings] if max_filings and max_filings < len(filings) else filings
 
     def _extract_qname(self, fact) -> tuple[str, str, str]:
         concept = getattr(fact, "concept", None)
@@ -289,7 +298,7 @@ class SECFilingParser:
         ticker: str,
         filing_types: str | set[str] = "10-K",
         max_filings: int | None = None,
-    ) -> list[ParsedFact]:
+    ) -> tuple[list[Filing], list[ParsedFact]]:
         """
         parse filings for a ticker. filing_types can be a single type like "10-k"
         or a set like {"10-k", "10-q"}. returns all xbrl facts from matching filings.
@@ -303,11 +312,14 @@ class SECFilingParser:
 
         if not filings:
             logger.info("no %s filings found for %s", filing_types, ticker)
-            return []
+            return ([], [])
 
         all_facts: list[ParsedFact] = []
 
-        for i, (acc_num, filename, form_type) in enumerate(filings):
+        for i, filing in enumerate(filings):
+            acc_num = filing.accession_number
+            filename = filing.primary_file
+            form_type = filing.filing_type
             acc_nd = acc_num.replace("-", "")
             url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_nd}/{filename}"
             logger.info("[%d/%d] %s %s", i + 1, len(filings), form_type, acc_num)
@@ -346,7 +358,7 @@ class SECFilingParser:
             except Exception as e:
                 raise SECFilingParserError(f"Error parsing {url}: {e}") from e
 
-        return all_facts
+        return filings, all_facts
 
 
 if __name__ == "__main__":
