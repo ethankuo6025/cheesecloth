@@ -4,15 +4,26 @@ from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 from typing import Any
-
 import httpx
 import logging
-
+import os
+from dotenv import load_dotenv
+from psycopg import Connection
 import rate_limiter
 from arelle.api.Session import Session
 from arelle.RuntimeOptions import RuntimeOptions
 from personal_header import header
+
 logger = logging.getLogger(__name__)
+load_dotenv()
+
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT")
+DB_NAME = os.getenv("DB_NAME")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+
+CONNINFO = f"host={DB_HOST} port={DB_PORT} dbname={DB_NAME} user={DB_USER} password={DB_PASSWORD}"
 
 class PeriodType(Enum):
     INSTANT = "instant"
@@ -146,6 +157,13 @@ class SECFilingParser:
             )
 
         filings = [(a, d, f) for a, d, f in zip(acc, docs, forms) if f in filing_types]
+
+        with Connection.connect(CONNINFO) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT accession_number FROM filings WHERE cik = %s AND accession_number = ANY(%s)", (cik, acc))
+                already_exists = {row[0] for row in cur.fetchall()}
+                filings = [filing for filing in filings if filing[0] not in already_exists]
+
         return filings[:max_filings] if max_filings else filings
 
     def _extract_qname(self, fact) -> tuple[str, str, str]:
