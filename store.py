@@ -35,7 +35,7 @@ def compute_fact_hash(f: ParsedFact) -> str:
         f"{f.instant_date}|{f.start_date}|{f.end_date}|"
         f"{dims}"
     )
-    return hashlib.sha256(data.encode("utf-8")).hexdigest()[:32]
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()[:64]
 
 
 def resolve_keep_higher(stored: int | None, incoming: int | None) -> int | None:
