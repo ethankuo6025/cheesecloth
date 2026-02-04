@@ -29,38 +29,6 @@ def get_connection(db_name=DB_NAME):
         print(f"Connection error (db={db_name}, host={DB_HOST}, port={DB_PORT}, user={DB_USER}): {e}")
         raise
 
-
-@contextmanager
-def get_cursor(write=True, db_name=DB_NAME):
-    conn = None
-    cursor = None
-    try:
-        conn = get_connection(db_name)
-        if conn is None:
-            raise Exception("Failed to connect to database")
-        cursor = conn.cursor()
-        yield cursor
-        if write:
-            conn.commit()
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        raise e
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
-
-
-def test_connection(db_name=DB_NAME):
-    conn = get_connection(db_name)
-    if conn:
-        conn.close()
-        return True
-    return False
-
-
 def create_database(db_name):
     """create the database if it doesn't exist. Returns True if exists or created."""
     ALREADY_EXISTS = "cheesecloth database already exists."
