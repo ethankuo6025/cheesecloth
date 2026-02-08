@@ -77,27 +77,27 @@ async def store_facts(
         filing_params = [(filing.cik, filing.accession_number) for filing in filings]
         
         async with conn.cursor() as cur:
+            await cur.execute("SELECT 1 FROM companies WHERE cik = %s", (cik,))
+            company_exists = await cur.fetchall()
+            if not company_exists:
+                await cur.execute(
+                    """
+                    INSERT INTO companies (cik, ticker) VALUES (%s, %s)
+                        ON CONFLICT (cik) DO NOTHING
+                    """,
+                    (cik, ticker),
+                )
             # insert parsed filings into database
             await cur.executemany(
                 "INSERT INTO filings (cik, accession_number) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                 filing_params
             )
-            await cur.execute("SELECT 1 FROM companies WHERE cik = %s", (cik,))
-            company_exists = await cur.fetchall()
-
+                
         for i in range(0, len(facts), batch_size):
             batch = facts[i : i + batch_size]
 
             async with conn.transaction():
                 async with conn.cursor() as cur:
-                    if not company_exists:
-                        await cur.execute(
-                            """
-                            INSERT INTO companies (cik, ticker) VALUES (%s, %s)
-                              ON CONFLICT (cik) DO NOTHING
-                            """,
-                            (cik, ticker),
-                        )
                     params: list[tuple] = []
                     hashes: list[str] = []
                     for fact in batch:
@@ -165,8 +165,7 @@ async def store_facts(
                                         WHEN facts.precision IS NULL THEN EXCLUDED.precision
                                         WHEN EXCLUDED.precision > facts.precision THEN EXCLUDED.precision
                                         ELSE facts.precision
-                                    END,
-                                    updated_at = CURRENT_TIMESTAMP
+                                    END
                                 """,
                                 params,
                             )

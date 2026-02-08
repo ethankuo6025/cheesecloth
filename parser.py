@@ -95,14 +95,13 @@ class SECFilingParser:
 
     def close(self) -> None:
         self._client.close()
-
+    
     # needed for the with SECFilingParser() as parser
     def __enter__(self) -> "SECFilingParser":
         return self
 
     def __exit__(self, *exc) -> None:
         self.close()
-
 
     def _get_json(self, url: str) -> Any:
         """get json from a url with rate limiting."""
@@ -144,7 +143,7 @@ class SECFilingParser:
         filing_types: set[str],
         max_filings: int | None = None,
     ) -> list[Filing]:
-        """get list of (accession_number, filename, filing_type) for specified filing types."""
+        """get list of filings for specified filing types, excluding already-scanned ones."""
         meta = self._get_json(f"https://data.sec.gov/submissions/CIK{cik}.json")
 
         try:
@@ -167,11 +166,9 @@ class SECFilingParser:
 
         with Connection.connect(CONNINFO) as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT 1 FROM companies WHERE cik = %s", (cik,))
-                if cur.fetchall() == 1:
-                    cur.execute("SELECT accession_number FROM filings WHERE cik = %s AND accession_number = ANY(%s)", (cik, acc))
-                    already_exists = {row[0] for row in cur.fetchall()}
-                    filings = [filing for filing in filings if filing.accession_number not in already_exists]
+                cur.execute("SELECT accession_number FROM filings WHERE cik = %s AND accession_number = ANY(%s)", (cik, acc))
+                already_exists = {row[0] for row in cur.fetchall()}
+                filings = [filing for filing in filings if filing.accession_number not in already_exists]
                 
         return filings[:max_filings] if max_filings and max_filings < len(filings) else filings
 
@@ -293,15 +290,15 @@ class SECFilingParser:
             dimensions=dimensions,
         )
 
-    def parse_filings(
+    def get_filings_to_parse(
         self,
         ticker: str,
         filing_types: str | set[str] = "10-K",
         max_filings: int | None = None,
-    ) -> tuple[list[Filing], list[ParsedFact]]:
+    ) -> tuple[str, list[Filing]]:
         """
-        parse filings for a ticker. filing_types can be a single type like "10-k"
-        or a set like {"10-k", "10-q"}. returns all xbrl facts from matching filings.
+        Get list of filings that need to be parsed (already filtered for unscanned filings).
+        Returns (cik, list of Filing objects).
         """
         if isinstance(filing_types, str):
             filing_types = {filing_types}
@@ -312,57 +309,56 @@ class SECFilingParser:
 
         if not filings:
             logger.info("no %s filings found for %s", filing_types, ticker)
-            return ([], [])
+        
+        return cik, filings
 
-        all_facts: list[ParsedFact] = []
+    def parse_filing(
+        self,
+        filing: Filing,
+        ticker: str,
+        cik: str,
+    ) -> list[ParsedFact]:
+        """
+        Parse a single filing and return its facts.
+        """
+        acc_num = filing.accession_number
+        filename = filing.primary_file
+        form_type = filing.filing_type
+        acc_nd = acc_num.replace("-", "")
+        url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_nd}/{filename}"
+        
+        logger.info("%s %s", form_type, acc_num)
 
-        for i, filing in enumerate(filings):
-            acc_num = filing.accession_number
-            filename = filing.primary_file
-            form_type = filing.filing_type
-            acc_nd = acc_num.replace("-", "")
-            url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_nd}/{filename}"
-            logger.info("[%d/%d] %s %s", i + 1, len(filings), form_type, acc_num)
+        options = RuntimeOptions(
+            entrypointFile=url,
+            internetConnectivity="online",
+            keepOpen=True,
+            logFile="logToStructuredMessage",
+            logFormat="[%(messageCode)s] %(message)s - %(file)s",
+            plugins="C:/Program Files/Arelle/plugin/EDGAR/transform/__init__.py|rate_limiter.py"
+        )
 
-            options = RuntimeOptions(
-                entrypointFile=url,
-                internetConnectivity="online",
-                keepOpen=True,
-                logFile="logToStructuredMessage",
-                logFormat="[%(messageCode)s] %(message)s - %(file)s",
-                plugins="C:/Program Files/Arelle/plugin/EDGAR/transform/__init__.py|rate_limiter.py"
-            )
+        try:
+            with Session() as session:
+                session.run(options)
+                models = session.get_models()
+                if not models:
+                    raise SECFilingParserError(f"No models loaded from {url}")
 
-            try:
-                with Session() as session:
-                    session.run(options)
-                    models = session.get_models()
-                    if not models:
-                        raise SECFilingParserError(f"No models loaded from {url}")
+                facts = list(models[0].factsInInstance)
+                parsed_facts: list[ParsedFact] = []
+                for fact in facts:
+                    try:
+                        parsed = self._parse_fact(fact, ticker, cik, acc_num)
+                        if _is_quantitative(parsed):
+                            parsed_facts.append(parsed)
+                    except SECFilingParserError as e:
+                        logger.debug("skip fact: %s", e)
 
-                    facts = list(models[0].factsInInstance)
-                    count = 0
-                    for fact in facts:
-                        try:
-                            parsed = self._parse_fact(fact, ticker, cik, acc_num)
-                            if _is_quantitative(parsed):
-                                all_facts.append(parsed)
-                                count += 1
-                        except SECFilingParserError as e:
-                            logger.debug("skip fact: %s", e)
+                logger.info("%d facts extracted", len(parsed_facts))
+                return parsed_facts
 
-                    logger.info("%d facts extracted", count)
-
-            except SECFilingParserError:
-                raise
-            except Exception as e:
-                raise SECFilingParserError(f"Error parsing {url}: {e}") from e
-
-        return filings, all_facts
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    with SECFilingParser(max_retries=3, timeout=30.0) as parser:
-        facts = parser.parse_filings("NVDA", filing_types="10-K", max_filings=1)
-        print("Total parsed facts:", len(facts))
+        except SECFilingParserError:
+            raise
+        except Exception as e:
+            raise SECFilingParserError(f"Error parsing {url}: {e}") from e
