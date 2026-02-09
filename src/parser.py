@@ -44,7 +44,6 @@ class ParsedFact:
     end_date: date | None = None
     unit: str | None = None
     decimals: int | None = None
-    precision: int | None = None
     dimensions: dict[str, str] = field(default_factory=dict)
 
 @dataclass
@@ -186,10 +185,8 @@ class SECFilingParser:
     def _extract_value(self, fact) -> str | None:
         return None if getattr(fact, "isNil", False) else getattr(fact, "value", None)
 
-    def _extract_decimals_precision(self, fact) -> tuple[int | None, int | None]:
-        decimals: int | None = None
-        precision: int | None = None
-
+    def _extract_decimals(self, fact) -> int | None:
+        decimals = None
         raw_dec = getattr(fact, "decimals", None)
         if raw_dec is not None and raw_dec != "INF":
             try:
@@ -197,14 +194,7 @@ class SECFilingParser:
             except (ValueError, TypeError):
                 pass
 
-        raw_prec = getattr(fact, "precision", None)
-        if raw_prec is not None and raw_prec != "INF":
-            try:
-                precision = int(raw_prec)
-            except (ValueError, TypeError):
-                pass
-
-        return decimals, precision
+        return decimals
 
     def _extract_unit(self, fact) -> str | None:
         unit_str = None
@@ -262,7 +252,7 @@ class SECFilingParser:
         """parse a single arelle fact into a parsedfact."""
         qname_str, namespace, local_name = self._extract_qname(fact)
         value = self._extract_value(fact)
-        decimals, precision = self._extract_decimals_precision(fact)
+        decimals = self._extract_decimals(fact)
         unit_str = self._extract_unit(fact)
 
         ctx = getattr(fact, "context", None)
@@ -286,7 +276,6 @@ class SECFilingParser:
             end_date=end_date,
             unit=unit_str,
             decimals=decimals,
-            precision=precision,
             dimensions=dimensions,
         )
 
