@@ -1,7 +1,7 @@
 import logging
 
 from parser import SECFilingParser
-from store import store_facts
+from src.store import store_facts
 import selectors
 import asyncio
 
