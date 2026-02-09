@@ -29,35 +29,13 @@ def compute_fact_hash(f: ParsedFact) -> str:
 
     # excludes value/decimals/precision
     data = (
-        f"{f.cik}|{f.accession_number}|"
+        f"{f.cik}|"
         f"{f.namespace}|{f.qname}|{f.local_name}|"
         f"{f.period_type.value}|{f.unit}|"
         f"{f.instant_date}|{f.start_date}|{f.end_date}|"
         f"{dims}"
     )
     return hashlib.sha256(data.encode("utf-8")).hexdigest()[:64]
-
-
-def resolve_keep_higher(stored: int | None, incoming: int | None) -> int | None:
-    """mirrors the CASE logic in the ON CONFLICT for decimals/precision."""
-    if incoming is None:
-        return stored
-    if stored is None:
-        return incoming
-    return incoming if incoming > stored else stored
-
-
-def would_update(stored: tuple, incoming: tuple) -> bool:
-    """return True if the ON CONFLICT SET would actually change any column."""
-    s_val, s_dec, s_prec = stored
-    i_val, i_dec, i_prec = incoming
-    if s_val != i_val:
-        return True
-    if resolve_keep_higher(s_dec, i_dec) != s_dec:
-        return True
-    if resolve_keep_higher(s_prec, i_prec) != s_prec:
-        return True
-    return False
 
 
 async def store_facts(
@@ -83,7 +61,7 @@ async def store_facts(
                 await cur.execute(
                     """
                     INSERT INTO companies (cik, ticker) VALUES (%s, %s)
-                        ON CONFLICT (cik) DO NOTHING
+                      ON CONFLICT (cik) DO NOTHING
                     """,
                     (cik, ticker),
                 )
@@ -99,11 +77,9 @@ async def store_facts(
             async with conn.transaction():
                 async with conn.cursor() as cur:
                     params: list[tuple] = []
-                    hashes: list[str] = []
                     for fact in batch:
                         try:
                             fact_hash = compute_fact_hash(fact)
-                            hashes.append(fact_hash)
                             params.append(
                                 (
                                     fact_hash,
@@ -119,52 +95,54 @@ async def store_facts(
                                     fact.end_date,
                                     fact.unit,
                                     fact.decimals,
-                                    fact.precision,
                                     json.dumps(fact.dimensions, sort_keys=True, separators=(",", ":"))
                                 )
                             )
                         except Exception as e:
                             failed += 1
-                            logger.info("Error inserting %s: %s", fact.qname, e)
+                            logger.info("Error building params for %s: %s", fact.qname, e)
 
                     if params:
                         try:
-                            await cur.execute(
-                                "SELECT fact_hash, value, decimals, precision FROM facts WHERE fact_hash = ANY(%s)", 
-                                (hashes,)
-                            )
-                            # build lookup of hash -> (value, decimals, precision)
-                            existing: dict[str, tuple] = {}
-                            async for row in cur: # cur is async so for loop needs to be too
-                                existing[row[0]] = (row[1], row[2], row[3])
-
-                            # drop anything already in the db that wouldn't actually change
-                            params = [
-                                p for p in params
-                                if p[0] not in existing
-                                or would_update(existing[p[0]], (p[7], p[12], p[13]))
-                            ] # use values, decimals, and precision
-
                             await cur.executemany(
                                 """
                                 INSERT INTO facts (
-                                    fact_hash, cik, accession_number, qname, namespace,
-                                    local_name, period_type, value, instant_date, start_date,
-                                    end_date, unit, decimals, precision, dimensions
-                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                  fact_hash, cik, accession_number, qname, namespace,
+                                  local_name, period_type, value, instant_date, start_date,
+                                  end_date, unit, decimals, dimensions
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                                 ON CONFLICT (fact_hash) DO UPDATE SET
-                                    value = EXCLUDED.value,
-                                    decimals = CASE
-                                        WHEN EXCLUDED.decimals IS NULL THEN facts.decimals
-                                        WHEN facts.decimals IS NULL THEN EXCLUDED.decimals
-                                        WHEN EXCLUDED.decimals > facts.decimals THEN EXCLUDED.decimals
-                                        ELSE facts.decimals
+                                  accession_number = CASE
+                                    WHEN facts.decimals IS NOT NULL
+                                      AND (EXCLUDED.decimals IS NULL
+                                        OR facts.decimals > EXCLUDED.decimals)
+                                      THEN facts.accession_number
+                                    WHEN EXCLUDED.decimals IS NOT NULL
+                                      AND (facts.decimals IS NULL
+                                        OR EXCLUDED.decimals > facts.decimals)
+                                      THEN EXCLUDED.accession_number
+                                    WHEN EXCLUDED.accession_number > facts.accession_number
+                                      THEN EXCLUDED.accession_number
+                                    ELSE facts.accession_number
+                                  END,
+                                    value = CASE
+                                    WHEN facts.decimals IS NOT NULL
+                                      AND (EXCLUDED.decimals IS NULL
+                                        OR facts.decimals > EXCLUDED.decimals)
+                                      THEN facts.value
+                                    WHEN EXCLUDED.decimals IS NOT NULL
+                                      AND (facts.decimals IS NULL
+                                        OR EXCLUDED.decimals > facts.decimals)
+                                      THEN EXCLUDED.value
+                                    WHEN EXCLUDED.accession_number > facts.accession_number
+                                      THEN EXCLUDED.value
+                                    ELSE facts.value
                                     END,
-                                    precision = CASE
-                                        WHEN EXCLUDED.precision IS NULL THEN facts.precision
-                                        WHEN facts.precision IS NULL THEN EXCLUDED.precision
-                                        WHEN EXCLUDED.precision > facts.precision THEN EXCLUDED.precision
-                                        ELSE facts.precision
+                                    decimals = CASE
+                                      WHEN EXCLUDED.decimals IS NULL THEN facts.decimals
+                                      WHEN facts.decimals IS NULL THEN EXCLUDED.decimals
+                                      WHEN EXCLUDED.decimals > facts.decimals THEN EXCLUDED.decimals
+                                      ELSE facts.decimals
                                     END
                                 """,
                                 params,

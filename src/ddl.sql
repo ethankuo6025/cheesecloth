@@ -27,7 +27,6 @@ CREATE TABLE IF NOT EXISTS facts (
     end_date DATE,
     unit VARCHAR(100),
     decimals INTEGER,
-    precision INTEGER,
     dimensions JSONB NOT NULL DEFAULT '{}',
     CONSTRAINT fk_filing 
       FOREIGN KEY (cik, accession_number) 
