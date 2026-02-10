@@ -9,7 +9,8 @@ from prompt_toolkit.shortcuts import clear as clear_screen
 
 from parser import SECFilingParser
 from main import parse_and_store
-from db import get_available_tickers, get_facts
+from db import get_available_tickers
+from helpers import get_facts
 
 logger = logging.getLogger(__name__)
 
@@ -20,21 +21,13 @@ ui_state = []
 cmd_session = None
 form_session = None
 
-<<<<<<< HEAD
 parser_ctx = None  # global parser kept open for the session
-=======
-_parser_ctx = None  # global parser kept open for the session
->>>>>>> 0d0ba61a21e2e616d0bab10833136e2683b4de81
 
 class AbortInput(Exception):
     pass
 
 kb = KeyBindings()
 kb.add("c-z")(lambda event: event.app.exit(exception=AbortInput()))
-
-REVENUE_QNAME_1 = "us-gaap:Revenues"
-REVENUE_QNAME_2 = "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
-DILUTED_EPS_QNAME = "us-gaap:EarningsPerShareDiluted"
 
 def header_line():
     return "═" * shutil.get_terminal_size(fallback=(80, 24))[0]
@@ -95,14 +88,10 @@ def prompt_int(prompt_text: str, default=None, min_val=None, max_val=None):
             print("  Enter a number.")
 
 def _run_scrape(ticker: str) -> tuple[int, int]:
-    """Synchronously run the async scrape pipeline. Called via asyncio.run."""
+    """synchronously run the async scrape pipeline. Called via asyncio.run."""
     async def _inner():
         upserted, failed = await parse_and_store(
-<<<<<<< HEAD
             parser_ctx, # type:ignore
-=======
-            _parser_ctx, # type:ignore
->>>>>>> 0d0ba61a21e2e616d0bab10833136e2683b4de81
             ticker=ticker,
             filing_types="10-K",
         )
@@ -114,11 +103,7 @@ def _run_scrape(ticker: str) -> tuple[int, int]:
     )
 
 def _prompt_and_scrape_ticker() -> str | None:
-    """
-    Ask the user to type a ticker that isn't yet in the DB, kick off a
-    scrape behind the scenes, and return the ticker string on success.
-    Returns None if the user cancels.
-    """
+    """processes new ticker for database."""
     ticker = prompt_str("Enter ticker to scrape (e.g. AAPL)", required=True)
     ticker = ticker.upper() # type:ignore
 
@@ -139,10 +124,8 @@ def _prompt_and_scrape_ticker() -> str | None:
     return ticker
 
 def prompt_ticker_selection() -> str | None:
-    """
-    Show available tickers; let the user pick one by number or choose 'none'
-    to trigger a fresh scrape.  Returns the chosen ticker string or None.
-    """
+    """returns the ticker selected by user."""
+
     available = get_available_tickers()  # [(ticker, updated_at), ...]
 
     print("\n── Select Ticker ──")
@@ -156,8 +139,19 @@ def prompt_ticker_selection() -> str | None:
 
     print(f"\n  Enter number to select, or 'none' to scrape a new ticker.")
 
+    ticker_words = [t for t, _ in available]
+    ticker_completer = WordCompleter(
+        ticker_words + ["none"],
+        ignore_case=True,
+        sentence=True,
+    )
+
     while True:
-        val = form_session.prompt("  Ticker: ").strip().lower() # type:ignore
+        val = form_session.prompt(  # type: ignore
+            "  Ticker: ",
+            completer=ticker_completer,
+            complete_while_typing=True,
+        ).strip().lower()
 
         if not val:
             print("  Please make a selection, or type 'none'.")
@@ -165,7 +159,7 @@ def prompt_ticker_selection() -> str | None:
 
         if val == "none":
             new_ticker = _prompt_and_scrape_ticker()
-            return new_ticker  # may be None if scrape failed/cancelled
+            return new_ticker
 
         if val.isdigit():
             idx = int(val)
@@ -183,7 +177,7 @@ def prompt_ticker_selection() -> str | None:
         print("  Not recognised. Enter a list number, a valid ticker, or 'none'.")
 
 def _format_table(headers: list[str], rows: list[tuple]) -> list[str]:
-    """Minimal ASCII table – same pattern as task-logger's format_table."""
+    """displays tuples in CLI."""
     if not rows:
         return ["  (no data)"]
 
@@ -201,13 +195,7 @@ def _format_table(headers: list[str], rows: list[tuple]) -> list[str]:
     return lines
 
 def _format_fact_rows(raw_rows) -> list[tuple]:
-    """
-    Convert raw DB rows into display tuples.
-
-    Each raw row is expected to be:
-        (local_name, period_type, value, instant_date, start_date, end_date,
-         unit, accession_number)
-    """
+    """converts raw DB rows into display tuples."""
     out = []
     for row in raw_rows:
         local_name, period_type, value, instant_date, start_date, end_date, unit, accession = row
@@ -240,26 +228,23 @@ def _format_fact_rows(raw_rows) -> list[tuple]:
     return out
 
 def cmd_ticker() -> list[str]:
-    """Select a ticker to work with for this session."""
+    """select a ticker to work with for this session."""
     ticker = prompt_ticker_selection()
     if not ticker:
         return ["No ticker selected."]
 
-    # stash in module-level state so revenue/eps commands can read it
     global _active_ticker
     _active_ticker = ticker
     return [f"Active ticker set to {ticker}.", "Use 'revenue' or 'eps' to explore data."]
 
 def cmd_revenue() -> list[str]:
-    """Show revenue facts for the active ticker."""
+    """show revenue facts for the active ticker."""
     ticker = _get_active_ticker()
     if ticker is None:
         return ["No ticker selected. Run 'ticker' first."]
 
     print(f"\n── Revenue for {ticker} ──")
-    raw = get_facts(ticker, REVENUE_QNAME_1)
-    if raw == None:
-        raw = get_facts(ticker, REVENUE_QNAME_2)
+    raw = get_facts(ticker, "revenue")
 
     if not raw:
         return [
@@ -275,13 +260,13 @@ def cmd_revenue() -> list[str]:
     return lines
 
 def cmd_eps() -> list[str]:
-    """Show diluted EPS facts for the active ticker."""
+    """show diluted EPS facts for the active ticker."""
     ticker = _get_active_ticker()
     if ticker is None:
         return ["No ticker selected. Run 'ticker' first."]
 
     print(f"\n── Diluted EPS for {ticker} ──")
-    raw = get_facts(ticker, DILUTED_EPS_QNAME)
+    raw = get_facts(ticker, "eps")
 
     if not raw:
         return [
@@ -349,11 +334,7 @@ def process_command(cmd: str) -> list[str]:
     return [f"Unknown command: '{cmd}'. Type 'help' for commands."]
 
 def main():
-<<<<<<< HEAD
     global cmd_session, form_session, parser_ctx
-=======
-    global cmd_session, form_session, _parser_ctx
->>>>>>> 0d0ba61a21e2e616d0bab10833136e2683b4de81
 
     logging.basicConfig(level=logging.WARNING)  # keep the terminal clean
 
@@ -368,19 +349,13 @@ def main():
     print(header_line())
 
     # keep one parser alive for the entire session (re-uses the HTTP session)
-<<<<<<< HEAD
     parser_ctx = SECFilingParser(max_retries=3, timeout=30.0).__enter__()
-=======
-    _parser_ctx = SECFilingParser(max_retries=3, timeout=30.0).__enter__()
->>>>>>> 0d0ba61a21e2e616d0bab10833136e2683b4de81
 
     try:
         reset_ui()
         tickers = get_available_tickers()
         if tickers:
             add_ui(
-                "Available tickers: " + ", ".join(t for t, _ in tickers),
-                "",
                 "Run 'ticker' to select one, or 'help' for all commands.",
             )
         else:
@@ -408,11 +383,7 @@ def main():
         print("\n\nGoodbye!")
     finally:
         try:
-<<<<<<< HEAD
             parser_ctx.__exit__(None, None, None)
-=======
-            _parser_ctx.__exit__(None, None, None)
->>>>>>> 0d0ba61a21e2e616d0bab10833136e2683b4de81
         except Exception:
             pass
 

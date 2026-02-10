@@ -140,8 +140,8 @@ def get_available_tickers() -> list[tuple]:
         )
         return cursor.fetchall()
 
-def get_facts(ticker: str, qname: str) -> list[tuple]:
-    """Fetch facts for a ticker and qname"""
+def query_facts_by_qname(ticker: str, qname: str) -> list[tuple]:
+    """fetch facts for a ticker and qname"""
     with get_cursor(write=False) as cursor:
         cursor.execute(
             """
