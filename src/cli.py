@@ -20,7 +20,11 @@ ui_state = []
 cmd_session = None
 form_session = None
 
+<<<<<<< HEAD
 parser_ctx = None  # global parser kept open for the session
+=======
+_parser_ctx = None  # global parser kept open for the session
+>>>>>>> 0d0ba61a21e2e616d0bab10833136e2683b4de81
 
 class AbortInput(Exception):
     pass
@@ -94,7 +98,11 @@ def _run_scrape(ticker: str) -> tuple[int, int]:
     """Synchronously run the async scrape pipeline. Called via asyncio.run."""
     async def _inner():
         upserted, failed = await parse_and_store(
+<<<<<<< HEAD
             parser_ctx, # type:ignore
+=======
+            _parser_ctx, # type:ignore
+>>>>>>> 0d0ba61a21e2e616d0bab10833136e2683b4de81
             ticker=ticker,
             filing_types="10-K",
         )
@@ -341,7 +349,11 @@ def process_command(cmd: str) -> list[str]:
     return [f"Unknown command: '{cmd}'. Type 'help' for commands."]
 
 def main():
+<<<<<<< HEAD
     global cmd_session, form_session, parser_ctx
+=======
+    global cmd_session, form_session, _parser_ctx
+>>>>>>> 0d0ba61a21e2e616d0bab10833136e2683b4de81
 
     logging.basicConfig(level=logging.WARNING)  # keep the terminal clean
 
@@ -356,7 +368,11 @@ def main():
     print(header_line())
 
     # keep one parser alive for the entire session (re-uses the HTTP session)
+<<<<<<< HEAD
     parser_ctx = SECFilingParser(max_retries=3, timeout=30.0).__enter__()
+=======
+    _parser_ctx = SECFilingParser(max_retries=3, timeout=30.0).__enter__()
+>>>>>>> 0d0ba61a21e2e616d0bab10833136e2683b4de81
 
     try:
         reset_ui()
@@ -392,7 +408,11 @@ def main():
         print("\n\nGoodbye!")
     finally:
         try:
+<<<<<<< HEAD
             parser_ctx.__exit__(None, None, None)
+=======
+            _parser_ctx.__exit__(None, None, None)
+>>>>>>> 0d0ba61a21e2e616d0bab10833136e2683b4de81
         except Exception:
             pass
 
