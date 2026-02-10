@@ -1,7 +1,7 @@
 import logging
 
 from parser import SECFilingParser
-from src.store import store_facts
+from store import store_facts
 import selectors
 import asyncio
 
@@ -67,9 +67,9 @@ async def main():
     with SECFilingParser(max_retries=3, timeout=30.0) as parser:
         upserted, failed = await parse_and_store(
             parser,
-            ticker="ASTS",
+            ticker="HOOD",
             filing_types="10-K",
-            max_filings=5,
+            max_filings=10,
         )
     print(f"\nDone: {upserted} upserted, {failed} failed")
 
