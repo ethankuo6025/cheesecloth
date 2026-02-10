@@ -15,6 +15,28 @@ DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 
+@contextmanager
+def get_cursor(write=True, db_name=DB_NAME):
+    conn = None
+    cursor = None
+    try:
+        conn = get_connection(db_name)
+        if conn is None:
+            raise Exception("Failed to connect to database")
+        cursor = conn.cursor()
+        yield cursor
+        if write:
+            conn.commit()
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise e
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+            
 def get_connection(db_name=DB_NAME):
     try:
         conn = psycopg.connect(
@@ -108,6 +130,41 @@ def reset_database(db_name):
     except Error as e:
         print(f"Error resetting database: {e}")
         return False
+
+
+def get_available_tickers() -> list[tuple]:
+    """Return [(ticker, updated_at), ...] sorted alphabetically."""
+    with get_cursor(write=False) as cursor:
+        cursor.execute(
+            "SELECT ticker, updated_at FROM companies ORDER BY ticker"
+        )
+        return cursor.fetchall()
+
+def get_facts(ticker: str, qname: str) -> list[tuple]:
+    """Fetch facts for a ticker and qname"""
+    with get_cursor(write=False) as cursor:
+        cursor.execute(
+            """
+            SELECT
+                f.local_name,
+                f.period_type,
+                f.value,
+                f.instant_date,
+                f.start_date,
+                f.end_date,
+                f.unit,
+                f.accession_number
+            FROM facts f
+            JOIN companies c ON c.cik = f.cik
+            WHERE c.ticker = %s
+              AND f.qname LIKE %s
+              AND f.dimensions = '{}'::jsonb
+            ORDER BY
+                COALESCE(f.end_date, f.instant_date) DESC NULLS LAST
+            """,
+            (ticker.upper(), qname),
+        )
+        return cursor.fetchall()
 
 if __name__ == "__main__":    
     if len(sys.argv) > 1 and sys.argv[1] == "--reset":
