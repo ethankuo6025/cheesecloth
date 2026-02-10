@@ -158,7 +158,6 @@ def get_facts(ticker: str, qname: str) -> list[tuple]:
             JOIN companies c ON c.cik = f.cik
             WHERE c.ticker = %s
               AND f.qname LIKE %s
-              AND f.dimensions = '{}'::jsonb
             ORDER BY
                 COALESCE(f.end_date, f.instant_date) DESC NULLS LAST
             """,
