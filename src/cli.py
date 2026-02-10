@@ -137,11 +137,11 @@ def prompt_ticker_selection() -> str | None:
     else:
         print("\n  No tickers in the database yet.")
 
-    print(f"\n  Enter number to select, or 'none' to scrape a new ticker.")
+    print(f"\n  Enter number to select, or 'add' to scrape a new ticker.")
 
     ticker_words = [t for t, _ in available]
     ticker_completer = WordCompleter(
-        ticker_words + ["none"],
+        ticker_words + ["add"],
         ignore_case=True,
         sentence=True,
     )
@@ -154,10 +154,10 @@ def prompt_ticker_selection() -> str | None:
         ).strip().lower()
 
         if not val:
-            print("  Please make a selection, or type 'none'.")
+            print("  Please make a selection, or type 'add'.")
             continue
 
-        if val == "none":
+        if val == "add":
             new_ticker = _prompt_and_scrape_ticker()
             return new_ticker
 
@@ -165,7 +165,7 @@ def prompt_ticker_selection() -> str | None:
             idx = int(val)
             if 1 <= idx <= len(available):
                 return available[idx - 1][0]
-            print(f"  Invalid number. Enter 1–{len(available)} or 'none'.")
+            print(f"  Invalid number. Enter 1–{len(available)} or 'add'.")
             continue
 
         # directly typing a ticker
@@ -174,7 +174,7 @@ def prompt_ticker_selection() -> str | None:
         if match:
             return match
 
-        print("  Not recognised. Enter a list number, a valid ticker, or 'none'.")
+        print("  Not recognised. Enter a list number, a valid ticker, or 'add'.")
 
 def _format_table(headers: list[str], rows: list[tuple]) -> list[str]:
     """displays tuples in CLI."""
@@ -244,7 +244,7 @@ def cmd_revenue() -> list[str]:
         return ["No ticker selected. Run 'ticker' first."]
 
     print(f"\n── Revenue for {ticker} ──")
-    raw = get_facts(ticker, "revenue")
+    raw = get_facts(ticker, "revenue", "annual")
 
     if not raw:
         return [
@@ -266,7 +266,7 @@ def cmd_eps() -> list[str]:
         return ["No ticker selected. Run 'ticker' first."]
 
     print(f"\n── Diluted EPS for {ticker} ──")
-    raw = get_facts(ticker, "eps")
+    raw = get_facts(ticker, "eps", "annual")
 
     if not raw:
         return [
@@ -295,7 +295,7 @@ def cmd_help() -> list[str]:
 │                                                                        │
 │  WORKFLOW                                                              │
 │    1.  Run 'ticker' to pick a company                                  │
-│    2.  Pick from the list OR type 'none' to scrape from SEC EDGAR      │
+│    2.  Pick from the list OR type 'add' to scrape from the EDGAR API   │
 │    3.  Run 'revenue' or 'eps' to view financial data                   │
 │                                                                        │
 │  Ctrl+C to exit  │  Ctrl+Z to cancel current input                     │
@@ -362,7 +362,7 @@ def main():
             add_ui(
                 "No tickers in the database yet.",
                 "",
-                "Run 'ticker' into 'none' to scrape your first company.",
+                "Run 'ticker' into 'add' to scrape your first company.",
             )
         render()
 
