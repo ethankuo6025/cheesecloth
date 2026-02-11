@@ -5,6 +5,11 @@ Stock screener utilizing the XBRL SEC API.
 ### Core Functionality
 - data ingestion through API
 - clean and process data
+- CLI interface for ease of use
 
 ### Next Up
-- SQL scripts to find tickers that fit certain criteria
+- map out EDGAR API qname taxonomy
+- add more views to cli
+- logging control when scraping from cli
+- add non-cli script to scrape data
+- quarterly view alongside annual

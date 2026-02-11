@@ -348,7 +348,7 @@ def main():
     print("CHEESECLOTH")
     print(header_line())
 
-    # keep one parser alive for the entire session (re-uses the HTTP session)
+    # keep one parser alive for the entire session
     parser_ctx = SECFilingParser(max_retries=3, timeout=30.0).__enter__()
 
     try:
