@@ -61,21 +61,24 @@ async def parse_and_store(
     return total_upserted, total_failed
 
 
-async def main():
+async def main(ticker: str, filing_types: list[str] = ["10-K", "10-Q"]):
     logging.basicConfig(level=logging.INFO)
-
-    with SECFilingParser(max_retries=3, timeout=30.0) as parser:
-        upserted, failed = await parse_and_store(
-            parser,
-            ticker="HOOD",
-            filing_types="10-K",
-            max_filings=10,
-        )
-    print(f"\nDone: {upserted} upserted, {failed} failed")
+    for filing_type in filing_types:
+        with SECFilingParser(max_retries=3, timeout=30.0) as parser:
+                upserted, failed = await parse_and_store(
+                    parser,
+                    ticker=ticker,
+                    filing_types=filing_type,
+                    max_filings=None,
+                )
+        print(f"\nDone: {upserted} upserted, {failed} failed")
 
 
 if __name__ == "__main__":
-    asyncio.run(
-        main(),
-        loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()),
-    )
+    tickers = ["HOOD", "RDDT", "NVDA", "XPRO", "WTTR", "WHD", "VAL", "TTI", "TS", "SLB", "RNGR", "RIG", "RES", "PUMP", "PDS", "NOV"]
+    for ticker in tickers:
+        asyncio.run(
+            main(ticker, ["10-K", "10-Q"]),
+            loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()),
+        )
+    

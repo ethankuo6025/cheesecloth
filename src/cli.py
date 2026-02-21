@@ -29,30 +29,30 @@ class AbortInput(Exception):
 kb = KeyBindings()
 kb.add("c-z")(lambda event: event.app.exit(exception=AbortInput()))
 
-def header_line():
+def _header_line():
     return "═" * shutil.get_terminal_size(fallback=(80, 24))[0]
 
-def reset_ui():
+def _reset_ui():
     global ui_state
     ui_state = []
 
-def add_ui(*lines):
+def _add_ui(*lines):
     for line in lines:
         ui_state.extend(line if isinstance(line, list) else [str(line)])
 
-def render():
+def _render():
     clear_screen()
     rows = shutil.get_terminal_size(fallback=(80, 24))[1]
     visible = ui_state[-min(len(ui_state), min(MAX_UI_HEIGHT, max(5, rows - 5))):]
 
-    print(header_line())
+    print(_header_line())
     print("  SEC FILING EXPLORER  │  'help' for commands  │  Ctrl+Z cancel  │  Ctrl+C exit")
-    print(header_line())
+    print(_header_line())
     for line in visible:
         print(line)
-    print(header_line())
+    print(_header_line())
 
-def prompt_str(prompt_text: str, required=True, default=None) -> str | None:
+def _prompt_str(prompt_text: str, required=True, default=None) -> str | None:
     prompt_text = f"{prompt_text} [{default}]: " if default else f"{prompt_text}: "
     while True:
         val = form_session.prompt(prompt_text).strip() # type:ignore
@@ -64,12 +64,12 @@ def prompt_str(prompt_text: str, required=True, default=None) -> str | None:
             return None
         print("  This field is required.")
 
-def prompt_yes_no(prompt_text: str, default=False):
+def _prompt_yes_no(prompt_text: str, default=False):
     hint = "[Y/n]" if default else "[y/N]"
     val = form_session.prompt(f"{prompt_text} {hint}: ").strip().lower() # type:ignore
     return val in ("y", "yes") if val else default
 
-def prompt_int(prompt_text: str, default=None, min_val=None, max_val=None):
+def _prompt_int(prompt_text: str, default=None, min_val=None, max_val=None):
     prompt_text = f"{prompt_text} [{default}]: " if default is not None else f"{prompt_text}: "
     while True:
         val = form_session.prompt(prompt_text).strip() # type:ignore
@@ -104,7 +104,7 @@ def _run_scrape(ticker: str) -> tuple[int, int]:
 
 def _prompt_and_scrape_ticker() -> str | None:
     """processes new ticker for database."""
-    ticker = prompt_str("Enter ticker to scrape (e.g. AAPL)", required=True)
+    ticker = _prompt_str("Enter ticker to scrape (e.g. AAPL)", required=True)
     ticker = ticker.upper() # type:ignore
 
     print(f"\n  Scraping SEC filings for {ticker} – this may take a moment...")
@@ -123,7 +123,7 @@ def _prompt_and_scrape_ticker() -> str | None:
     print(f"  Done – {upserted} facts stored, {failed} failed.")
     return ticker
 
-def prompt_ticker_selection() -> str | None:
+def _prompt_ticker_selection() -> str | None:
     """returns the ticker selected by user."""
 
     available = get_available_tickers()  # [(ticker, updated_at), ...]
@@ -227,9 +227,9 @@ def _format_fact_rows(raw_rows) -> list[tuple]:
 
     return out
 
-def cmd_ticker() -> list[str]:
+def _cmd_ticker() -> list[str]:
     """select a ticker to work with for this session."""
-    ticker = prompt_ticker_selection()
+    ticker = _prompt_ticker_selection()
     if not ticker:
         return ["No ticker selected."]
 
@@ -237,7 +237,7 @@ def cmd_ticker() -> list[str]:
     _active_ticker = ticker
     return [f"Active ticker set to {ticker}.", "Use 'revenue' or 'eps' to explore data."]
 
-def cmd_revenue() -> list[str]:
+def _cmd_revenue() -> list[str]:
     """show revenue facts for the active ticker."""
     ticker = _get_active_ticker()
     if ticker is None:
@@ -259,7 +259,7 @@ def cmd_revenue() -> list[str]:
     lines += ["", f"  {len(rows)} record(s) found."]
     return lines
 
-def cmd_eps() -> list[str]:
+def _cmd_eps() -> list[str]:
     """show diluted EPS facts for the active ticker."""
     ticker = _get_active_ticker()
     if ticker is None:
@@ -281,7 +281,7 @@ def cmd_eps() -> list[str]:
     lines += ["", f"  {len(rows)} record(s) found."]
     return lines
 
-def cmd_help() -> list[str]:
+def _cmd_help() -> list[str]:
     return ["""
 ┌────────────────────────────────────────────────────────────────────────┐
 │                              CHEESECLOTH                               │
@@ -308,13 +308,13 @@ def _get_active_ticker() -> str | None:
     return _active_ticker
 
 COMMAND_MAP = {
-    "ticker":  cmd_ticker,
-    "revenue": cmd_revenue,
-    "eps":     cmd_eps,
-    "help":    cmd_help,
+    "ticker":  _cmd_ticker,
+    "revenue": _cmd_revenue,
+    "eps":     _cmd_eps,
+    "help":    _cmd_help,
 }
 
-def process_command(cmd: str) -> list[str]:
+def _process_command(cmd: str) -> list[str]:
     cmd = cmd.strip().lower()
     if not cmd:
         return []
@@ -333,7 +333,7 @@ def process_command(cmd: str) -> list[str]:
 
     return [f"Unknown command: '{cmd}'. Type 'help' for commands."]
 
-def main():
+def _main():
     global cmd_session, form_session, parser_ctx
 
     logging.basicConfig(level=logging.WARNING)  # keep the terminal clean
@@ -344,40 +344,40 @@ def main():
     )
     form_session = PromptSession(key_bindings=kb)
 
-    print(header_line())
+    print(_header_line())
     print("CHEESECLOTH")
-    print(header_line())
+    print(_header_line())
 
     # keep one parser alive for the entire session
     parser_ctx = SECFilingParser(max_retries=3, timeout=30.0).__enter__()
 
     try:
-        reset_ui()
+        _reset_ui()
         tickers = get_available_tickers()
         if tickers:
-            add_ui(
+            _add_ui(
                 "Run 'ticker' to select one, or 'help' for all commands.",
             )
         else:
-            add_ui(
+            _add_ui(
                 "No tickers in the database yet.",
                 "",
                 "Run 'ticker' into 'add' to scrape your first company.",
             )
-        render()
+        _render()
 
         while True:
             try:
                 raw = cmd_session.prompt("\n> ").strip()
-                result = process_command(raw)
+                result = _process_command(raw)
                 if result:
-                    reset_ui()
-                    add_ui(result)
-                    render()
+                    _reset_ui()
+                    _add_ui(result)
+                    _render()
             except AbortInput:
-                reset_ui()
-                add_ui("Cancelled.")
-                render()
+                _reset_ui()
+                _add_ui("Cancelled.")
+                _render()
 
     except (EOFError, KeyboardInterrupt):
         print("\n\nGoodbye!")
@@ -388,4 +388,4 @@ def main():
             pass
 
 if __name__ == "__main__":
-    main()
+    _main()
