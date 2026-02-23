@@ -1,8 +1,7 @@
 from db import query_facts_by_qname
 from datetime import timedelta
 qname_mapping = {
-    "revenue": ["us-gaap:Revenues",
-                 "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"],
+    "revenue": ["us-gaap:Revenues"],
     "eps": ["us-gaap:EarningsPerShareDiluted"]}
 
 def get_facts(ticker: str, target_qname: str, query_type: str) -> list[tuple]:
@@ -11,7 +10,6 @@ def get_facts(ticker: str, target_qname: str, query_type: str) -> list[tuple]:
     except KeyError as e:
         raise ValueError(f"Unknown query field: {target_qname!r}") from e
 
-    qnames = qname_mapping[target_qname]
     facts = []
     for qname in qnames:
         facts += query_facts_by_qname(ticker, qname)

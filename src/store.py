@@ -32,7 +32,8 @@ def compute_fact_hash(f: ParsedFact) -> str:
         f"{f.cik}|"
         f"{f.qname}|{f.local_name}|"
         f"{f.period_type.value}|{f.unit}|"
-        f"{f.instant_date}|{f.start_date}|{f.end_date}"    
+        f"{f.instant_date}|{f.start_date}|{f.end_date}|"
+        f"{dims}"
     )
     return hashlib.sha256(data.encode("utf-8")).hexdigest()[:64]
 
