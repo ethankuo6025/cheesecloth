@@ -17,14 +17,7 @@ from personal_header import header
 logger = logging.getLogger(__name__)
 load_dotenv()
 
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT")
-DB_NAME = os.getenv("DB_NAME")
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
 ARELLE_PLUGINS_PATH = os.getenv("ARELLE_PLUGINS_PATH")
-
-CONNINFO = f"host={DB_HOST} port={DB_PORT} dbname={DB_NAME} user={DB_USER} password={DB_PASSWORD}"
 
 class PeriodType(Enum):
     INSTANT = "instant"
@@ -81,10 +74,12 @@ class SECFilingParser:
     """parses xbrl facts from sec edgar filings (defaults to 10-ks)."""
     def __init__(
         self,
+        conn: Connection,
         max_retries: int = 3,
         timeout: float = 30.0,
         headers: dict[str, str] | None = None,
     ):
+        self._conn = conn
         self._ticker_to_cik: dict[str, str] | None = None
         self._client = httpx.Client(
             timeout=timeout,
@@ -203,11 +198,10 @@ class SECFilingParser:
                     for a, d, f in zip(acc, docs, forms)
                     if d != "" and f in filing_types]
         
-        with Connection.connect(CONNINFO) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT accession_number FROM filings WHERE cik = %s AND accession_number = ANY(%s)", (cik, acc))
-                already_exists = {row[0] for row in cur.fetchall()}
-                filings = [filing for filing in filings if filing.accession_number not in already_exists]
+        with self._conn.cursor() as cur:
+            cur.execute("SELECT accession_number FROM filings WHERE cik = %s AND accession_number = ANY(%s)", (cik, acc))
+            already_exists = {row[0] for row in cur.fetchall()}
+            filings = [filing for filing in filings if filing.accession_number not in already_exists]
                 
         return filings[:max_filings] if max_filings and max_filings < len(filings) else filings
 

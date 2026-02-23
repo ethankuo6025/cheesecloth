@@ -1,9 +1,22 @@
 import logging
+import os
+
+from dotenv import load_dotenv
+from psycopg_pool import ConnectionPool
 
 from parser import SECFilingParser
 from store import store_facts
 import selectors
 import asyncio
+
+load_dotenv()
+
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT")
+DB_NAME = os.getenv("DB_NAME")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+CONNINFO = f"host={DB_HOST} port={DB_PORT} dbname={DB_NAME} user={DB_USER} password={DB_PASSWORD}"
 
 logger = logging.getLogger(__name__)
 
@@ -63,19 +76,21 @@ async def parse_and_store(
 
 async def main(ticker: str, filing_types: list[str] = ["10-K", "10-Q"]):
     logging.basicConfig(level=logging.INFO)
-    for filing_type in filing_types:
-        with SECFilingParser(max_retries=3, timeout=30.0) as parser:
-                upserted, failed = await parse_and_store(
-                    parser,
-                    ticker=ticker,
-                    filing_types=filing_type,
-                    max_filings=None,
-                )
-        print(f"\nDone: {upserted} upserted, {failed} failed")
+    with ConnectionPool(CONNINFO) as pool:
+        with pool.connection() as conn:
+            for filing_type in filing_types:
+                with SECFilingParser(conn, max_retries=3, timeout=30.0) as parser:
+                    upserted, failed = await parse_and_store(
+                        parser,
+                        ticker=ticker,
+                        filing_types=filing_type,
+                        max_filings=None,
+                    )
+                    print(f"\nDone: {upserted} upserted, {failed} failed")
 
-
+# "HOOD", "RDDT", "NVDA", "XPRO", "WTTR", "WHD", "VAL", "TTI", "TS", "SLB", "RNGR", "RIG", "RES", "PUMP", "PDS", "NOV"
 if __name__ == "__main__":
-    tickers = ["HOOD", "RDDT", "NVDA", "XPRO", "WTTR", "WHD", "VAL", "TTI", "TS", "SLB", "RNGR", "RIG", "RES", "PUMP", "PDS", "NOV"]
+    tickers = ["XPRO"]
     for ticker in tickers:
         asyncio.run(
             main(ticker, ["10-K", "10-Q"]),

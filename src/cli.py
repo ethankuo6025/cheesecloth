@@ -9,7 +9,7 @@ from prompt_toolkit.shortcuts import clear as clear_screen
 
 from parser import SECFilingParser
 from main import parse_and_store
-from db import get_available_tickers
+from db import get_available_tickers, get_connection
 from helpers import get_facts
 
 logger = logging.getLogger(__name__)
@@ -349,7 +349,8 @@ def _main():
     print(_header_line())
 
     # keep one parser alive for the entire session
-    parser_ctx = SECFilingParser(max_retries=3, timeout=30.0).__enter__()
+    conn = get_connection()
+    parser_ctx = SECFilingParser(conn, max_retries=3, timeout=30.0).__enter__()
 
     try:
         _reset_ui()
@@ -384,6 +385,10 @@ def _main():
     finally:
         try:
             parser_ctx.__exit__(None, None, None)
+        except Exception:
+            pass
+        try:
+            conn.close()
         except Exception:
             pass
 
