@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 import httpx
 import logging
 import os
@@ -22,6 +22,7 @@ DB_PORT = os.getenv("DB_PORT")
 DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
+ARELLE_PLUGINS_PATH = os.getenv("ARELLE_PLUGINS_PATH")
 
 CONNINFO = f"host={DB_HOST} port={DB_PORT} dbname={DB_NAME} user={DB_USER} password={DB_PASSWORD}"
 
@@ -50,7 +51,7 @@ class ParsedFact:
 class Filing:
     cik: str
     accession_number: str
-    primary_file: str
+    entry_file: str
     filing_type: str
 
 def _is_quantitative(parsed: ParsedFact) -> bool:
@@ -135,7 +136,31 @@ class SECFilingParser:
         if t not in mapping:
             raise TickerNotFoundError(f"Ticker '{ticker}' not found")
         return mapping[t]
+    
+    def _get_entry_url(self, cik: str, accession_number: str) -> str:
+        base = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_number}/"
+        idx = self._get_json(base + "index.json")
+        items = idx.get("directory", {}).get("item", [])
+        names = [it.get("name") for it in items if isinstance(it, dict) and it.get("name")]
+        names = cast(list[str], names)
 
+        xmls = [n for n in names if n.lower().endswith(".xml") or n.lower().endswith(".xbrl")]
+        candidates = []
+        for n in xmls:
+            nl = n.lower()
+            if any(s in nl for s in ("_cal", "_def", "_lab", "_pre", "schema", "summary")):
+                continue
+            candidates.append(n)
+
+        for n in candidates:
+            url = n
+            r = self._client.get(url, headers={"Range": "bytes=0-65535"})
+            t = r.text.lower()
+            if "<xbrl" in t:
+                return n
+
+        return ""
+    
     def _get_filings(
         self,
         cik: str,
@@ -147,12 +172,19 @@ class SECFilingParser:
 
         try:
             recent = meta["filings"]["recent"]
-            acc = recent["accessionNumber"]
-            docs = recent["primaryDocument"]
             forms = recent["form"]
         except KeyError as e:
             raise SECFilingParserError(f"Unexpected metadata structure/key: {e}") from e
 
+        acc = recent["accessionNumber"]
+        docs = recent["primaryDocument"]
+        forms = recent["form"]
+        is_ixbrl = recent["isInlineXBRL"]
+
+        for i in range(len(docs)):
+            if is_ixbrl[i] != 1:
+                docs[i] = self._get_entry_url(cik=cik, accession_number=acc[i])
+        
         if not (isinstance(acc, list) and isinstance(docs, list) and isinstance(forms, list)):
             raise SECFilingParserError("Unexpected metadata structure: filings.recent fields are not lists")
 
@@ -160,9 +192,17 @@ class SECFilingParser:
             raise SECFilingParserError(
                 f"mismatched array lengths: acc={len(acc)}, docs={len(docs)}, forms={len(forms)}"
             )
-
-        filings = [Filing(cik=cik, accession_number=a, primary_file=p, filing_type=f) for a, p, f in zip(acc, docs, forms) if f in filing_types]
-
+        
+        filings = [Filing
+                    (
+                        cik=cik, 
+                        accession_number=a, 
+                        entry_file=d, 
+                        filing_type=f, 
+                    ) 
+                    for a, d, f in zip(acc, docs, forms)
+                    if d != "" and f in filing_types]
+        
         with Connection.connect(CONNINFO) as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT accession_number FROM filings WHERE cik = %s AND accession_number = ANY(%s)", (cik, acc))
@@ -311,7 +351,7 @@ class SECFilingParser:
         Parse a single filing and return its facts.
         """
         acc_num = filing.accession_number
-        filename = filing.primary_file
+        filename = filing.entry_file
         form_type = filing.filing_type
         acc_nd = acc_num.replace("-", "")
         url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_nd}/{filename}"
@@ -324,7 +364,7 @@ class SECFilingParser:
             keepOpen=True,
             logFile="logToStructuredMessage",
             logFormat="[%(messageCode)s] %(message)s - %(file)s",
-            plugins="C:/Program Files/Arelle/plugin/EDGAR/transform/__init__.py|rate_limiter.py"
+            plugins=f"{ARELLE_PLUGINS_PATH}|rate_limiter.py"
         )
 
         try:
