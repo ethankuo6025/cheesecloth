@@ -5,7 +5,6 @@ from datetime import date
 from enum import Enum
 from typing import Any, cast
 import httpx
-import logging
 import os
 from dotenv import load_dotenv
 from psycopg import Connection
@@ -13,6 +12,10 @@ import rate_limiter
 from arelle.api.Session import Session
 from arelle.RuntimeOptions import RuntimeOptions
 from personal_header import header
+import logging
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -133,7 +136,7 @@ class SECFilingParser:
         return mapping[t]
     
     def _get_entry_url(self, cik: str, accession_number: str) -> str:
-        base = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_number}/"
+        base = f"https://www.sec.gov/Archives/edgar/data/{cik.lstrip("0")}/{accession_number.replace("-", "")}/"
         idx = self._get_json(base + "index.json")
         items = idx.get("directory", {}).get("item", [])
         names = [it.get("name") for it in items if isinstance(it, dict) and it.get("name")]
@@ -148,7 +151,7 @@ class SECFilingParser:
             candidates.append(n)
 
         for n in candidates:
-            url = n
+            url = base + n
             r = self._client.get(url, headers={"Range": "bytes=0-65535"})
             t = r.text.lower()
             if "<xbrl" in t:
@@ -167,17 +170,16 @@ class SECFilingParser:
 
         try:
             recent = meta["filings"]["recent"]
-            forms = recent["form"]
         except KeyError as e:
             raise SECFilingParserError(f"Unexpected metadata structure/key: {e}") from e
-
+        forms = recent["form"]
         acc = recent["accessionNumber"]
         docs = recent["primaryDocument"]
         forms = recent["form"]
         is_ixbrl = recent["isInlineXBRL"]
 
         for i in range(len(docs)):
-            if is_ixbrl[i] != 1:
+            if is_ixbrl[i] != 1 and forms[i] in filing_types:
                 docs[i] = self._get_entry_url(cik=cik, accession_number=acc[i])
         
         if not (isinstance(acc, list) and isinstance(docs, list) and isinstance(forms, list)):
@@ -344,14 +346,12 @@ class SECFilingParser:
         """
         Parse a single filing and return its facts.
         """
-        acc_num = filing.accession_number
+        accession_number = filing.accession_number
         filename = filing.entry_file
         form_type = filing.filing_type
-        acc_nd = acc_num.replace("-", "")
-        url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_nd}/{filename}"
+        accession_number_nd = accession_number.replace("-", "")
+        url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_number_nd}/{filename}"
         
-        logger.info("%s %s", form_type, acc_num)
-
         options = RuntimeOptions(
             entrypointFile=url,
             internetConnectivity="online",
@@ -372,13 +372,12 @@ class SECFilingParser:
                 parsed_facts: list[ParsedFact] = []
                 for fact in facts:
                     try:
-                        parsed = self._parse_fact(fact, ticker, cik, acc_num)
+                        parsed = self._parse_fact(fact, ticker, cik, accession_number)
                         if _is_quantitative(parsed):
                             parsed_facts.append(parsed)
                     except SECFilingParserError as e:
                         logger.debug("skip fact: %s", e)
 
-                logger.info("%d facts extracted", len(parsed_facts))
                 return parsed_facts
 
         except SECFilingParserError:

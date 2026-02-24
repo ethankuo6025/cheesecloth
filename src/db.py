@@ -153,6 +153,7 @@ def query_facts_by_qname(ticker: str, qname: str) -> list[tuple]:
                 f.start_date,
                 f.end_date,
                 f.unit,
+                f.decimals,
                 f.accession_number
             FROM facts f
             JOIN companies c ON c.cik = f.cik

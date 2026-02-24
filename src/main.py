@@ -40,7 +40,6 @@ async def parse_and_store(
     )
     
     if not filings_to_parse:
-        logger.info("No filings to parse for %s", ticker)
         return 0, 0
     
     total_upserted = total_failed = 0
@@ -90,7 +89,7 @@ async def main(ticker: str, filing_types: list[str] = ["10-K", "10-Q"]):
 
 # "HOOD", "RDDT", "NVDA", "XPRO", "WTTR", "WHD", "VAL", "TTI", "TS", "SLB", "RNGR", "RIG", "RES", "PUMP", "PDS", "NOV"
 if __name__ == "__main__":
-    tickers = ["XPRO"]
+    tickers = ["NVDA"]
     for ticker in tickers:
         asyncio.run(
             main(ticker, ["10-K", "10-Q"]),

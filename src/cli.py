@@ -107,7 +107,7 @@ def _prompt_and_scrape_ticker() -> str | None:
     ticker = _prompt_str("Enter ticker to scrape (e.g. AAPL)", required=True)
     ticker = ticker.upper() # type:ignore
 
-    print(f"\n  Scraping SEC filings for {ticker} – this may take a moment...")
+    print(f"\n  Scraping SEC filings for {ticker} - this may take a moment...")
 
     try:
         upserted, failed = _run_scrape(ticker)
@@ -120,7 +120,7 @@ def _prompt_and_scrape_ticker() -> str | None:
         print(f"  ✗ No filings found for '{ticker}'. Check the ticker symbol.")
         return None
 
-    print(f"  Done – {upserted} facts stored, {failed} failed.")
+    print(f"  Done - {upserted} facts stored, {failed} failed.")
     return ticker
 
 def _prompt_ticker_selection() -> str | None:
@@ -165,7 +165,7 @@ def _prompt_ticker_selection() -> str | None:
             idx = int(val)
             if 1 <= idx <= len(available):
                 return available[idx - 1][0]
-            print(f"  Invalid number. Enter 1–{len(available)} or 'add'.")
+            print(f"  Invalid number. Enter 1-{len(available)} or 'add'.")
             continue
 
         # directly typing a ticker
@@ -198,15 +198,15 @@ def _format_fact_rows(raw_rows) -> list[tuple]:
     """converts raw DB rows into display tuples."""
     out = []
     for row in raw_rows:
-        local_name, period_type, value, instant_date, start_date, end_date, unit, accession = row
+        _, period_type, value, instant_date, start_date, end_date, unit, decimals,accession = row
 
-        # build a friendly date string
+        # build date string
         if period_type == "instant" and instant_date:
             date_str = str(instant_date)
         elif start_date and end_date:
             date_str = f"{start_date} -> {end_date}"
         else:
-            date_str = "–"
+            date_str = "-"
 
         # format numeric value
         try:
@@ -218,10 +218,10 @@ def _format_fact_rows(raw_rows) -> list[tuple]:
             else:
                 value_str = f"${numeric:,.2f}"
         except (TypeError, ValueError):
-            value_str = str(value) if value is not None else "–"
+            value_str = str(value) if value is not None else "-"
 
-        unit_str = unit or "–"
-        accession_short = accession[-8:] if accession else "–"
+        unit_str = unit or "-"
+        accession_short = accession[-8:] if accession else "-"
 
         out.append((date_str, value_str, unit_str, accession_short))
 
