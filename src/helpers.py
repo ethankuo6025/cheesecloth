@@ -36,7 +36,7 @@ def _filter_dedup_and_sort(facts: list[tuple], query_type: str) -> list[tuple]:
             deduped.append(f)
 
     if query_type == "annual":
-        deduped = [f for f in deduped if f[INST_DATE_IDX].month == 1 or (not f[INST_DATE_IDX] and (f[END_DATE_IDX] - f[START_DATE_IDX] > timedelta(days=350)))]
+        deduped = [f for f in deduped if (f[INST_DATE_IDX] and f[INST_DATE_IDX].month == 1) or (not f[INST_DATE_IDX] and (f[END_DATE_IDX] - f[START_DATE_IDX] > timedelta(days=350)))]
     elif query_type == "quarterly":
         deduped = [f for f in deduped if f[INST_DATE_IDX] or (f[END_DATE_IDX] - f[START_DATE_IDX] < timedelta(days=100))]
 
