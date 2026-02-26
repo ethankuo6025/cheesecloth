@@ -2,15 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
-
 from psycopg import Connection
 
 from dotenv import load_dotenv
 import os
 from parser import ParsedFact, Filing
-
-logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -100,7 +96,6 @@ def store_facts(
                             )
                         except Exception as e:
                             failed += 1
-                            logger.info("Error building params for %s: %s", fact.qname, e)
 
                     if params:
                         try:
@@ -150,8 +145,4 @@ def store_facts(
                             upserted += len(params)
                         except Exception as e:
                             failed += len(params)
-                            logger.info("Batch insert failed (%d rows): %s", len(params), e)
-
-            logger.info("Processed %d/%d", min(i + batch_size, len(facts)), len(facts))
-
     return upserted, failed
