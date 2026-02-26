@@ -15,7 +15,7 @@ from helpers import get_facts
 logger = logging.getLogger(__name__)
 
 MAX_UI_HEIGHT = 30
-COMMANDS = ["ticker", "revenue", "eps", "help", "quit"]
+COMMANDS = ["ticker", "revenue", "eps", "debt", "help", "quit"]
 
 ui_state = []
 cmd_session = None
@@ -65,11 +65,13 @@ def _prompt_str(prompt_text: str, required=True, default=None) -> str | None:
         print("  This field is required.")
 
 def _prompt_yes_no(prompt_text: str, default=False):
+    # reused from another project, maybe needed later
     hint = "[Y/n]" if default else "[y/N]"
     val = form_session.prompt(f"{prompt_text} {hint}: ").strip().lower() # type:ignore
     return val in ("y", "yes") if val else default
 
 def _prompt_int(prompt_text: str, default=None, min_val=None, max_val=None):
+    # reused from another project, maybe needed later
     prompt_text = f"{prompt_text} [{default}]: " if default is not None else f"{prompt_text}: "
     while True:
         val = form_session.prompt(prompt_text).strip() # type:ignore
@@ -237,46 +239,23 @@ def _cmd_ticker() -> list[str]:
     _active_ticker = ticker
     return [f"Active ticker set to {ticker}.", "Use 'revenue' or 'eps' to explore data."]
 
-def _cmd_revenue() -> list[str]:
-    """show revenue facts for the active ticker."""
+def _cmd_query(query: str, display_name: str) -> list[str]:
+    """show queried facts for the active ticker."""
     ticker = _get_active_ticker()
     if ticker is None:
         return ["No ticker selected. Run 'ticker' first."]
 
-    print(f"\n── Revenue for {ticker} ──")
-    raw = get_facts(ticker, "revenue", "annual")
+    print(f"\n── {display_name} for {ticker} ──")
+    raw = get_facts(ticker, query, "annual")
 
     if not raw:
         return [
-            f"No revenue data found for {ticker}.",
-            "The ticker may not have 10-K filings with us-gaap:Revenues.",
+            f"No {display_name.lower()} data found for {ticker}."
         ]
 
     rows = _format_fact_rows(raw)
-    headers = ["Period", "Revenue", "Unit", "Accession (tail)"]
-    lines = [f"Revenue - {ticker}", ""]
-    lines += _format_table(headers, rows)
-    lines += ["", f"  {len(rows)} record(s) found."]
-    return lines
-
-def _cmd_eps() -> list[str]:
-    """show diluted EPS facts for the active ticker."""
-    ticker = _get_active_ticker()
-    if ticker is None:
-        return ["No ticker selected. Run 'ticker' first."]
-
-    print(f"\n── Diluted EPS for {ticker} ──")
-    raw = get_facts(ticker, "eps", "annual")
-
-    if not raw:
-        return [
-            f"No EPS data found for {ticker}.",
-            "The ticker may not have 10-K filings with us-gaap:EarningsPerShareDiluted.",
-        ]
-
-    rows = _format_fact_rows(raw)
-    headers = ["Period", "EPS (Diluted)", "Unit", "Accession (tail)"]
-    lines = [f"Diluted EPS - {ticker}", ""]
+    headers = ["Period", display_name, "Unit", "Accession (tail)"]
+    lines = [f"{display_name} - {ticker}", ""]
     lines += _format_table(headers, rows)
     lines += ["", f"  {len(rows)} record(s) found."]
     return lines
@@ -307,10 +286,20 @@ _active_ticker: str | None = None
 def _get_active_ticker() -> str | None:
     return _active_ticker
 
+def _cmd_revenue():
+    return _cmd_query(query="revenue", display_name="Revenue")
+
+def _cmd_eps():
+    return _cmd_query(query="eps", display_name="Diluted EPS")
+
+def _cmd_debt():
+    return _cmd_query(query="debt", display_name="Total Debt")
+
 COMMAND_MAP = {
     "ticker":  _cmd_ticker,
     "revenue": _cmd_revenue,
     "eps":     _cmd_eps,
+    "debt":    _cmd_debt,
     "help":    _cmd_help,
 }
 
@@ -336,7 +325,7 @@ def _process_command(cmd: str) -> list[str]:
 def _main():
     global cmd_session, form_session, parser_ctx
 
-    logging.basicConfig(level=logging.WARNING)  # keep the terminal clean
+    logging.basicConfig(level=logging.WARNING)  # keep terminal clean
 
     cmd_session = PromptSession(
         completer=WordCompleter(COMMANDS, ignore_case=True, sentence=True),
