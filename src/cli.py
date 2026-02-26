@@ -7,15 +7,17 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.shortcuts import clear as clear_screen
 
-from parser import SECFilingParser
-from main import parse_and_store
+from parser import SECFilingParser, TickerNotFoundError
+from add import parse_and_store
 from db import get_available_tickers, get_connection
 from helpers import get_facts
+
+logging.getLogger("arelle").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
 MAX_UI_HEIGHT = 30
-COMMANDS = ["ticker", "revenue", "eps", "debt", "help", "quit"]
+COMMANDS = ["ticker", "revenue", "eps", "liabilities", "help", "quit"]
 
 ui_state = []
 cmd_session = None
@@ -113,13 +115,15 @@ def _prompt_and_scrape_ticker() -> str | None:
 
     try:
         upserted, failed = _run_scrape(ticker)
+    except TickerNotFoundError:
+        print(f"  '{ticker}' was not found in SEC EDGAR. Check the ticker symbol.")
+        return None
     except Exception as exc:
-        logger.error("Scrape failed: %s", exc, exc_info=True)
-        print(f"  ✗ Scrape failed: {exc}")
+        print(f"   Scrape failed: {exc}")
         return None
 
     if upserted == 0 and failed == 0:
-        print(f"  ✗ No filings found for '{ticker}'. Check the ticker symbol.")
+        print(f"  No filings found for '{ticker}'. Check the ticker symbol.")
         return None
 
     print(f"  Done - {upserted} facts stored, {failed} failed.")
@@ -267,8 +271,6 @@ def _cmd_help() -> list[str]:
 ├────────────────────────────────────────────────────────────────────────┤
 │  COMMANDS                                                              │
 │    - ticker   Select an existing ticker or scrape a new one            │
-│      - revenue  Shows available revenues for a parsed ticker           │
-│      - eps      Show diluted EPS for a parsed ticker                   │
 │    - help     Show this screen                                         │
 │    - quit     Exit the program                                         │
 │                                                                        │
@@ -292,14 +294,14 @@ def _cmd_revenue():
 def _cmd_eps():
     return _cmd_query(query="eps", display_name="Diluted EPS")
 
-def _cmd_debt():
-    return _cmd_query(query="debt", display_name="Total Debt")
+def _cmd_liabilities():
+    return _cmd_query(query="liabilities", display_name="Total Debt")
 
 COMMAND_MAP = {
     "ticker":  _cmd_ticker,
     "revenue": _cmd_revenue,
     "eps":     _cmd_eps,
-    "debt":    _cmd_debt,
+    "liabilities":    _cmd_liabilities,
     "help":    _cmd_help,
 }
 

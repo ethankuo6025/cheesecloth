@@ -13,6 +13,7 @@ from arelle.api.Session import Session
 from arelle.RuntimeOptions import RuntimeOptions
 from personal_header import header
 import logging
+logging.getLogger("arelle").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
@@ -89,6 +90,14 @@ class SECFilingParser:
             headers= headers or header(),
             follow_redirects=True,
             transport=httpx.HTTPTransport(retries=max_retries),
+        )
+        self._options: RuntimeOptions = RuntimeOptions(
+            entrypointFile=None,
+            internetConnectivity="online",
+            keepOpen=True,
+            logFile="logToStructuredMessage",
+            logFormat="[%(messageCode)s] %(message)s - %(file)s",
+            plugins=f"{ARELLE_PLUGINS_PATH}|rate_limiter.py"
         )
 
     def close(self) -> None:
@@ -348,22 +357,15 @@ class SECFilingParser:
         """
         accession_number = filing.accession_number
         filename = filing.entry_file
-        form_type = filing.filing_type
         accession_number_nd = accession_number.replace("-", "")
         url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_number_nd}/{filename}"
         
-        options = RuntimeOptions(
-            entrypointFile=url,
-            internetConnectivity="online",
-            keepOpen=True,
-            logFile="logToStructuredMessage",
-            logFormat="[%(messageCode)s] %(message)s - %(file)s",
-            plugins=f"{ARELLE_PLUGINS_PATH}|rate_limiter.py"
-        )
+        self._options.entrypointFile = url
 
         try:
             with Session() as session:
-                session.run(options)
+                logging.getLogger("arelle").setLevel(logging.WARNING)
+                session.run(self._options)
                 models = session.get_models()
                 if not models:
                     raise SECFilingParserError(f"No models loaded from {url}")

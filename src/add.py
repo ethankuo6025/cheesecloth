@@ -4,10 +4,11 @@ import os
 from dotenv import load_dotenv
 from psycopg_pool import ConnectionPool
 
-from parser import SECFilingParser
+from parser import SECFilingParser, TickerNotFoundError
 from store import store_facts
 import selectors
 import asyncio
+import sys
 
 load_dotenv()
 
@@ -17,6 +18,8 @@ DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 CONNINFO = f"host={DB_HOST} port={DB_PORT} dbname={DB_NAME} user={DB_USER} password={DB_PASSWORD}"
+
+logging.getLogger("arelle").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -87,12 +90,14 @@ async def main(ticker: str, filing_types: list[str] = ["10-K", "10-Q"]):
                     )
                     print(f"\nDone: {upserted} upserted, {failed} failed")
 
-# "HOOD", "RDDT", "NVDA", "XPRO", "WTTR", "WHD", "VAL", "TTI", "TS", "SLB", "RNGR", "RIG", "RES", "PUMP", "PDS", "NOV"
-if __name__ == "__main__":
-    tickers = ["NVDA"]
-    for ticker in tickers:
-        asyncio.run(
-            main(ticker, ["10-K", "10-Q"]),
-            loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()),
-        )
-    
+if __name__ == "__main__":  
+    if len(sys.argv) > 1:
+        tickers = sys.argv[1:]
+        for ticker in tickers:
+            try:
+                asyncio.run(
+                    main(ticker, ["10-K", "10-Q"]),
+                    loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()),
+                )
+            except TickerNotFoundError:
+                print(f"'{ticker}' was not found in SEC EDGAR. Skipping.")
