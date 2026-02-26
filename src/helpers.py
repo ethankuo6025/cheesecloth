@@ -3,13 +3,20 @@ from db import query_facts_by_qname
 from datetime import timedelta
 
 qnames_mapping = {
-    "revenue": ["us-gaap:Revenues", 
-                "us-gaap:SalesRevenueNet", 
-                "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
-                "us-gaap:RevenueFromContractWithCustomerIncludingAssessedTax",
-                "us-gaap:SalesRevenueGoodsNet", 
-                "us-gaap:SalesRevenueServicesNet"],
-    "eps": ["us-gaap:EarningsPerShareDiluted"]}
+    "revenue": [
+        "us-gaap:Revenues", 
+        "us-gaap:SalesRevenueNet", 
+        "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+        "us-gaap:RevenueFromContractWithCustomerIncludingAssessedTax",
+        "us-gaap:SalesRevenueGoodsNet", 
+        "us-gaap:SalesRevenueServicesNet"
+    ],
+    "eps": [
+        "us-gaap:EarningsPerShareDiluted",
+        "us-gaap:IncomeLossFromContinuingOperationsPerDilutedShare",
+        "us-gaap:ProfitLossPerShareDiluted"
+    ]
+}
 
 def sort_by_date(facts: list[tuple], descending: bool=True) -> list[tuple]:
     if facts[0][3]: # using instance dates
