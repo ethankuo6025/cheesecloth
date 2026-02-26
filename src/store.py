@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 
-from psycopg import AsyncConnection
+from psycopg import Connection
 
 from dotenv import load_dotenv
 import os
@@ -38,7 +38,7 @@ def compute_fact_hash(f: ParsedFact) -> str:
     return hashlib.sha256(data.encode("utf-8")).hexdigest()[:64]
 
 
-async def store_facts(
+def store_facts(
     filings: list[Filing],
     facts: list[ParsedFact],
     batch_size: int = 500,
@@ -49,16 +49,16 @@ async def store_facts(
 
     upserted = failed = 0
 
-    async with await AsyncConnection.connect(CONNINFO) as conn:
+    with Connection.connect(CONNINFO) as conn:
         cik = facts[0].cik
         ticker = facts[0].ticker
         filing_params = [(filing.cik, filing.accession_number) for filing in filings]
-        
-        async with conn.cursor() as cur:
-            await cur.execute("SELECT 1 FROM companies WHERE cik = %s", (cik,))
-            company_exists = await cur.fetchall()
+
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM companies WHERE cik = %s", (cik,))
+            company_exists = cur.fetchall()
             if not company_exists:
-                await cur.execute(
+                cur.execute(
                     """
                     INSERT INTO companies (cik, ticker) VALUES (%s, %s)
                       ON CONFLICT (cik) DO NOTHING
@@ -66,16 +66,16 @@ async def store_facts(
                     (cik, ticker),
                 )
             # insert parsed filings into database
-            await cur.executemany(
+            cur.executemany(
                 "INSERT INTO filings (cik, accession_number) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                 filing_params
             )
-                
+
         for i in range(0, len(facts), batch_size):
             batch = facts[i : i + batch_size]
 
-            async with conn.transaction():
-                async with conn.cursor() as cur:
+            with conn.transaction():
+                with conn.cursor() as cur:
                     params: list[tuple] = []
                     for fact in batch:
                         try:
@@ -104,7 +104,7 @@ async def store_facts(
 
                     if params:
                         try:
-                            await cur.executemany(
+                            cur.executemany(
                                 """
                                 INSERT INTO facts (
                                   fact_hash, cik, accession_number, qname, namespace,

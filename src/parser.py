@@ -13,7 +13,6 @@ from arelle.api.Session import Session
 from arelle.RuntimeOptions import RuntimeOptions
 from personal_header import header
 import logging
-logging.getLogger("arelle").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
@@ -97,6 +96,7 @@ class SECFilingParser:
             keepOpen=True,
             logFile="logToStructuredMessage",
             logFormat="[%(messageCode)s] %(message)s - %(file)s",
+            logLevel="WARNING",
             plugins=f"{ARELLE_PLUGINS_PATH}|rate_limiter.py"
         )
 
@@ -105,6 +105,7 @@ class SECFilingParser:
     
     # needed for the with SECFilingParser() as parser
     def __enter__(self) -> "SECFilingParser":
+        self._session = Session().__enter__()
         return self
 
     def __exit__(self, *exc) -> None:
@@ -364,23 +365,22 @@ class SECFilingParser:
 
         try:
             with Session() as session:
-                logging.getLogger("arelle").setLevel(logging.WARNING)
                 session.run(self._options)
                 models = session.get_models()
                 if not models:
                     raise SECFilingParserError(f"No models loaded from {url}")
 
-                facts = list(models[0].factsInInstance)
-                parsed_facts: list[ParsedFact] = []
-                for fact in facts:
-                    try:
-                        parsed = self._parse_fact(fact, ticker, cik, accession_number)
-                        if _is_quantitative(parsed):
-                            parsed_facts.append(parsed)
-                    except SECFilingParserError as e:
-                        logger.debug("skip fact: %s", e)
+            facts = list(models[0].factsInInstance)
+            parsed_facts: list[ParsedFact] = []
+            for fact in facts:
+                try:
+                    parsed = self._parse_fact(fact, ticker, cik, accession_number)
+                    if _is_quantitative(parsed):
+                        parsed_facts.append(parsed)
+                except SECFilingParserError as e:
+                    logger.debug("skip fact: %s", e)
 
-                return parsed_facts
+            return parsed_facts
 
         except SECFilingParserError:
             raise

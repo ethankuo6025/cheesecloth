@@ -1,5 +1,3 @@
-import asyncio
-import selectors
 import logging
 import shutil
 from prompt_toolkit.key_binding import KeyBindings
@@ -11,8 +9,6 @@ from parser import SECFilingParser, TickerNotFoundError
 from add import parse_and_store
 from db import get_available_tickers, get_connection
 from helpers import get_facts
-
-logging.getLogger("arelle").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -92,19 +88,13 @@ def _prompt_int(prompt_text: str, default=None, min_val=None, max_val=None):
             print("  Enter a number.")
 
 def _run_scrape(ticker: str) -> tuple[int, int]:
-    """synchronously run the async scrape pipeline. Called via asyncio.run."""
-    async def _inner():
-        upserted, failed = await parse_and_store(
-            parser_ctx, # type:ignore
-            ticker=ticker,
-            filing_types="10-K",
-        )
-        return upserted, failed
-
-    return asyncio.run(
-        _inner(),
-        loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()),
-    )
+    total_upserted = 0
+    total_failed = 0
+    for filing_type in ("10-K", "10-Q"):
+        upserted, failed = parse_and_store(parser_ctx, ticker=ticker, filing_types=filing_type)  # type:ignore
+        total_upserted += upserted
+        total_failed += failed
+    return total_upserted, total_failed
 
 def _prompt_and_scrape_ticker() -> str | None:
     """processes new ticker for database."""
