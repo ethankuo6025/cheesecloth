@@ -29,6 +29,8 @@ DEFAULT_FILING_TYPES = ("10-K", "10-Q")
 
 logger = logging.getLogger(__name__)
 
+logging.basicConfig(level=logging.INFO)
+
 def parse_and_store(
     parser: SECFilingParser,
     ticker: str,
@@ -57,7 +59,7 @@ def parse_and_store(
 
     for i, filing in enumerate(filings_to_parse, start=1):
         logger.info(
-            "Processing filing %d/%d: %s",
+            " Processing filing %d/%d: %s",
             i, len(filings_to_parse), filing.accession_number,
         )
 
@@ -67,12 +69,12 @@ def parse_and_store(
             total_upserted += upserted
             total_failed += failed
             logger.info(
-                "Filing %s: %d facts upserted, %d failed",
+                " Filing %s: %d facts upserted, %d failed",
                 filing.accession_number, upserted, failed,
             )
         except Exception as e:
             logger.error(
-                "Failed to process filing %s: %s",
+                " Failed to process filing %s: %s",
                 filing.accession_number, e, exc_info=True,
             )
             total_failed += 1
@@ -166,7 +168,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not tickers:
         ap.error("No tickers supplied. Pass symbols inline or use --file.")
 
-    logger.info("Processing %d ticker(s): %s", len(tickers), ", ".join(tickers))
+    logger.info(" Processing %d ticker(s): %s", len(tickers), ", ".join(tickers))
 
     total_upserted = 0
     total_failed = 0

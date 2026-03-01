@@ -317,8 +317,6 @@ def _process_command(cmd: str) -> list[str]:
 def _main():
     global cmd_session, form_session, parser_ctx
 
-    logging.basicConfig(level=logging.WARNING)  # keep terminal clean
-
     cmd_session = PromptSession(
         completer=WordCompleter(COMMANDS, ignore_case=True, sentence=True),
         key_bindings=kb,

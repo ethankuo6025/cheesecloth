@@ -22,7 +22,7 @@ def load_tickers_from_file(path: str) -> list[str]:
         if "#" in line:
             line = line.split("#", 1)[0]
         line = line.strip()
-        if line is not None:
+        if line:
             tickers.append(line.upper())
 
     logger.info("Loaded %d ticker(s) from %s", len(tickers), p)

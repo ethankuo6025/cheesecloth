@@ -185,13 +185,12 @@ class SECFilingParser:
         forms = recent["form"]
         acc = recent["accessionNumber"]
         docs = recent["primaryDocument"]
-        forms = recent["form"]
         is_ixbrl = recent["isInlineXBRL"]
 
         for i in range(len(docs)):
             if is_ixbrl[i] != 1 and forms[i] in filing_types:
                 docs[i] = self._get_entry_url(cik=cik, accession_number=acc[i])
-        
+
         if not (isinstance(acc, list) and isinstance(docs, list) and isinstance(forms, list)):
             raise SECFilingParserError("Unexpected metadata structure: filings.recent fields are not lists")
 
@@ -210,12 +209,36 @@ class SECFilingParser:
                     for a, d, f in zip(acc, docs, forms)
                     if d != "" and f in filing_types]
         
+        matching_count = len(filings)
+        types_str = ", ".join(sorted(filing_types))
+
+        if matching_count == 0:
+            logger.info(" No %s filings exist for CIK %s", types_str, cik)
+            return []
+
+        
         with self._conn.cursor() as cur:
-            cur.execute("SELECT accession_number FROM filings WHERE cik = %s AND accession_number = ANY(%s)", (cik, acc))
+            cur.execute(
+                "SELECT accession_number FROM filings WHERE cik = %s AND accession_number = ANY(%s)",
+                (cik, acc),
+            )
             already_exists = {row[0] for row in cur.fetchall()}
-            filings = [filing for filing in filings if filing.accession_number not in already_exists]
-                
+            filings = [f for f in filings if f.accession_number not in already_exists]
+
+        unprocessed_count = len(filings)
+        if unprocessed_count == 0:
+            logger.info(
+                " All %d %s filing(s) for CIK %s already stored; nothing new to process",
+                matching_count, types_str, cik,
+            )
+        else:
+            logger.info(
+                " %d of %d %s filing(s) for CIK %s are new",
+                unprocessed_count, matching_count, types_str, cik,
+            )
+
         return filings[:max_filings] if max_filings and max_filings < len(filings) else filings
+
 
     def _extract_qname(self, fact) -> tuple[str, str, str]:
         concept = getattr(fact, "concept", None)
@@ -331,20 +354,13 @@ class SECFilingParser:
         filing_types: str | set[str] = "10-K",
         max_filings: int | None = None,
     ) -> tuple[str, list[Filing]]:
-        """
-        Get list of filings that need to be parsed (already filtered for unscanned filings).
-        Returns (cik, list of Filing objects).
-        """
+        """get list of filings that need to be parsed (already filtered for unscanned filings)."""
         if isinstance(filing_types, str):
             filing_types = {filing_types}
 
         ticker = ticker.upper()
         cik = self._get_cik(ticker)
         filings = self._get_filings(cik, filing_types, max_filings)
-
-        if not filings:
-            logger.info("no %s filings found for %s", filing_types, ticker)
-        
         return cik, filings
 
     def parse_filing(
@@ -353,9 +369,7 @@ class SECFilingParser:
         ticker: str,
         cik: str,
     ) -> list[ParsedFact]:
-        """
-        Parse a single filing and return its facts.
-        """
+        """parse a single filing and return its facts."""
         accession_number = filing.accession_number
         filename = filing.entry_file
         accession_number_nd = accession_number.replace("-", "")
