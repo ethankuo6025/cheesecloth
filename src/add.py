@@ -39,11 +39,7 @@ def parse_and_store(
     batch_size: int = 500,
 ) -> tuple[int, int]:
     """
-    Parse all un-stored filings of the requested type(s) for `ticker`
-    and persist their facts.
-
-    Returns:
-        (total_upserted, total_failed)
+    parse all un-stored filings of the requested type(s) for `ticker` and persist their facts.
     """
     cik, filings_to_parse = parser.get_filings_to_parse(
         ticker,
@@ -91,10 +87,7 @@ def process_ticker(
     timeout: float,
 ) -> tuple[int, int]:
     """
-    Run the full pipeline for one ticker across every requested filing type.
-
-    Returns:
-        (upserted, failed) aggregated across all filing types.
+    run the full pipeline for one ticker across every requested filing type.
     """
     total_upserted = total_failed = 0
     for ftype in filing_types:

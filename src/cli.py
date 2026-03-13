@@ -12,14 +12,20 @@ from helpers import get_facts
 
 logger = logging.getLogger(__name__)
 
-MAX_UI_HEIGHT = 30
-COMMANDS = ["ticker", "revenue", "eps", "liabilities", "help", "quit"]
+BASE_COMMANDS = ["ticker", "mode", "help", "quit"]
+QUERY_COMMANDS = [
+    "revenue", "eps", "gross", "operating", "net",
+    "liabilities", "assets", "cash", "debt", "shares",
+]
 
 ui_state = []
 cmd_session = None
 form_session = None
 
 parser_ctx = None  # global parser kept open for the session
+
+_active_ticker: str | None = None
+_query_mode: str = "annual"  # "annual", "quarterly", or "all"
 
 class AbortInput(Exception):
     pass
@@ -38,15 +44,20 @@ def _add_ui(*lines):
     for line in lines:
         ui_state.extend(line if isinstance(line, list) else [str(line)])
 
+def _get_available_commands() -> list[str]:
+    """Returns commands available based on current state."""
+    if _active_ticker:
+        return BASE_COMMANDS + QUERY_COMMANDS
+    return BASE_COMMANDS
+
 def _render():
     clear_screen()
-    rows = shutil.get_terminal_size(fallback=(80, 24))[1]
-    visible = ui_state[-min(len(ui_state), min(MAX_UI_HEIGHT, max(5, rows - 5))):]
-
     print(_header_line())
-    print("  SEC FILING EXPLORER  │  'help' for commands  │  Ctrl+Z cancel  │  Ctrl+C exit")
+    ticker_info = f"Ticker: {_active_ticker}" if _active_ticker else "No ticker"
+    mode_info = f"Mode: {_query_mode.upper()}"
+    print(f"  CHEESECLOTH  │  {ticker_info}  │  {mode_info}  │  'help' for commands")
     print(_header_line())
-    for line in visible:
+    for line in ui_state:
         print(line)
     print(_header_line())
 
@@ -190,11 +201,11 @@ def _format_table(headers: list[str], rows: list[tuple]) -> list[str]:
         lines.append("  " + fmt.format(*(str(c) if c is not None else "" for c in row)))
     return lines
 
-def _format_fact_rows(raw_rows) -> list[tuple]:
+def _format_fact_rows(raw_rows, is_per_share=False, is_count=False) -> list[tuple]:
     """converts raw DB rows into display tuples."""
     out = []
     for row in raw_rows:
-        _, period_type, value, instant_date, start_date, end_date, unit, decimals,accession = row
+        _, period_type, value, instant_date, start_date, end_date, unit, decimals, accession = row
 
         # build date string
         if period_type == "instant" and instant_date:
@@ -207,12 +218,26 @@ def _format_fact_rows(raw_rows) -> list[tuple]:
         # format numeric value
         try:
             numeric = float(value)
-            if abs(numeric) >= 1_000_000_000:
-                value_str = f"${numeric / 1_000_000_000:.2f}B"
-            elif abs(numeric) >= 1_000_000:
-                value_str = f"${numeric / 1_000_000:.2f}M"
+            if is_per_share:
+                value_str = f"${numeric:.2f}"
+            elif is_count:
+                if abs(numeric) >= 1_000_000_000:
+                    value_str = f"{numeric / 1_000_000_000:.2f}B"
+                elif abs(numeric) >= 1_000_000:
+                    value_str = f"{numeric / 1_000_000:.2f}M"
+                elif abs(numeric) >= 1_000:
+                    value_str = f"{numeric / 1_000:.2f}K"
+                else:
+                    value_str = f"{numeric:,.0f}"
             else:
-                value_str = f"${numeric:,.2f}"
+                if abs(numeric) >= 1_000_000_000:
+                    value_str = f"${numeric / 1_000_000_000:.2f}B"
+                elif abs(numeric) >= 1_000_000:
+                    value_str = f"${numeric / 1_000_000:.2f}M"
+                elif abs(numeric) >= 1_000:
+                    value_str = f"${numeric / 1_000:.2f}K"
+                else:
+                    value_str = f"${numeric:,.2f}"
         except (TypeError, ValueError):
             value_str = str(value) if value is not None else "-"
 
@@ -231,49 +256,79 @@ def _cmd_ticker() -> list[str]:
 
     global _active_ticker
     _active_ticker = ticker
-    return [f"Active ticker set to {ticker}.", "Use 'revenue' or 'eps' to explore data."]
+    return [
+        f"Active ticker set to {ticker}.",
+        "",
+        "Available queries: revenue, eps, gross, operating, net,",
+        "                   liabilities, assets, cash, debt, shares",
+    ]
 
-def _cmd_query(query: str, display_name: str) -> list[str]:
+def _cmd_mode() -> list[str]:
+    """toggle or set query mode for date range filtering."""
+    global _query_mode
+    
+    print("\n── Query Mode ──")
+    print(f"  Current: {_query_mode.upper()}")
+    print("  1. annual  2. quarterly  3. all")
+    
+    mode_completer = WordCompleter(
+        ["annual", "quarterly", "all", "1", "2", "3"],
+        ignore_case=True,
+    )
+    
+    val = form_session.prompt("  Select: ", completer=mode_completer).strip().lower()  # type: ignore
+    
+    modes = {
+        "1": "annual", "2": "quarterly", "3": "all",
+        "annual": "annual", "quarterly": "quarterly", "all": "all",
+        "a": "annual", "q": "quarterly"
+    }
+    
+    if val in modes:
+        _query_mode = modes[val]
+        return [f"Query mode: {_query_mode.upper()}"]
+    
+    return [f"Invalid. Mode unchanged: {_query_mode.upper()}"]
+
+def _cmd_query(query: str, display_name: str, is_per_share: bool = False, is_count: bool = False) -> list[str]:
     """show queried facts for the active ticker."""
-    ticker = _get_active_ticker()
-    if ticker is None:
-        return ["No ticker selected. Run 'ticker' first."]
-
-    print(f"\n── {display_name} for {ticker} ──")
-    raw = get_facts(ticker, query, "annual")
+    ticker = _active_ticker
+    mode_label = _query_mode.upper()
+    raw = get_facts(ticker, query, _query_mode)  # type: ignore
 
     if not raw:
-        return [
-            f"No {display_name.lower()} data found for {ticker}."
-        ]
+        return [f"No {display_name.lower()} data for {ticker} ({mode_label})."]
 
-    rows = _format_fact_rows(raw)
-    headers = ["Period", display_name, "Unit", "Accession (tail)"]
-    lines = [f"{display_name} - {ticker}", ""]
+    rows = _format_fact_rows(raw, is_per_share=is_per_share, is_count=is_count)
+    headers = ["Period", display_name, "Unit", "Accession"]
+    lines = [f"{display_name} - {ticker} ({mode_label})", ""]
     lines += _format_table(headers, rows)
-    lines += ["", f"  {len(rows)} record(s) found."]
+    lines += ["", f"  {len(rows)} record(s)."]
     return lines
 
 def _cmd_help() -> list[str]:
-    return ["""
-┌────────────────────────────────────────────────────────────────────────┐
-│                              CHEESECLOTH                               │
-├────────────────────────────────────────────────────────────────────────┤
-│  COMMANDS                                                              │
-│    - ticker   Select an existing ticker or scrape a new one            │
-│    - help     Show this screen                                         │
-│    - quit     Exit the program                                         │
-│                                                                        │
-│  WORKFLOW                                                              │
-│    1.  Run 'ticker' to pick a company                                  │
-│    2.  Pick from the list OR type 'add' to scrape from the EDGAR API   │
-│    3.  Run 'revenue' or 'eps' to view financial data                   │
-│                                                                        │
-│  Ctrl+C to exit  │  Ctrl+Z to cancel current input                     │
-└────────────────────────────────────────────────────────────────────────┘
-"""]
-
-_active_ticker: str | None = None
+    lines = [
+        "COMMANDS",
+        "  ticker  - Select or add a ticker",
+        "  mode    - Toggle annual/quarterly/all",
+        "  help    - Show this help",
+        "  quit    - Exit",
+        "",
+    ]
+    if _active_ticker:
+        lines += [
+            "QUERIES (requires ticker)",
+            "  revenue, gross, operating, net, eps",
+            "  assets, liabilities, cash, debt, shares",
+        ]
+    else:
+        lines += ["Run 'ticker' first to enable financial queries."]
+    
+    lines += [
+        "",
+        "KEYS: Ctrl+C exit | Ctrl+Z cancel",
+    ]
+    return lines
 
 def _get_active_ticker() -> str | None:
     return _active_ticker
@@ -282,17 +337,49 @@ def _cmd_revenue():
     return _cmd_query(query="revenue", display_name="Revenue")
 
 def _cmd_eps():
-    return _cmd_query(query="eps", display_name="Diluted EPS")
+    return _cmd_query(query="eps", display_name="Diluted EPS", is_per_share=True)
+
+def _cmd_gross():
+    return _cmd_query(query="gross", display_name="Gross Profit")
+
+def _cmd_operating():
+    return _cmd_query(query="operating", display_name="Operating Income")
+
+def _cmd_net():
+    return _cmd_query(query="net", display_name="Net Income")
 
 def _cmd_liabilities():
-    return _cmd_query(query="liabilities", display_name="Total Debt")
+    return _cmd_query(query="liabilities", display_name="Total Liabilities")
 
-COMMAND_MAP = {
-    "ticker":  _cmd_ticker,
-    "revenue": _cmd_revenue,
-    "eps":     _cmd_eps,
-    "liabilities":    _cmd_liabilities,
-    "help":    _cmd_help,
+def _cmd_assets():
+    return _cmd_query(query="total_assets", display_name="Total Assets")
+
+def _cmd_cash():
+    return _cmd_query(query="cash_on_hand", display_name="Cash on Hand")
+
+def _cmd_debt():
+    return _cmd_query(query="long_term_debt", display_name="Long-Term Debt")
+
+def _cmd_shares():
+    return _cmd_query(query="shares_outstanding", display_name="Shares Outstanding", is_count=True)
+
+BASE_COMMAND_MAP = {
+    "ticker": _cmd_ticker,
+    "mode":   _cmd_mode,
+    "help":   _cmd_help,
+}
+
+QUERY_COMMAND_MAP = {
+    "revenue":     _cmd_revenue,
+    "eps":         _cmd_eps,
+    "gross":       _cmd_gross,
+    "operating":   _cmd_operating,
+    "net":         _cmd_net,
+    "liabilities": _cmd_liabilities,
+    "assets":      _cmd_assets,
+    "cash":        _cmd_cash,
+    "debt":        _cmd_debt,
+    "shares":      _cmd_shares,
 }
 
 def _process_command(cmd: str) -> list[str]:
@@ -303,31 +390,40 @@ def _process_command(cmd: str) -> list[str]:
     if cmd in ("quit", "exit", "q"):
         raise KeyboardInterrupt
 
-    if cmd in COMMAND_MAP:
-        return COMMAND_MAP[cmd]()
+    if cmd in BASE_COMMAND_MAP:
+        return BASE_COMMAND_MAP[cmd]()
 
-    matches = [c for c in COMMAND_MAP if c.startswith(cmd)]
+    if cmd in QUERY_COMMAND_MAP:
+        if not _active_ticker:
+            return ["No ticker selected. Run 'ticker' first."]
+        return QUERY_COMMAND_MAP[cmd]()
+
+    # prefix matching
+    all_commands = {**BASE_COMMAND_MAP, **(QUERY_COMMAND_MAP if _active_ticker else {})}
+    matches = [c for c in all_commands if c.startswith(cmd)]
+    
     if len(matches) == 1:
-        return COMMAND_MAP[matches[0]]()
+        return _process_command(matches[0])
     if len(matches) > 1:
         return [f"Ambiguous: {', '.join(matches)}"]
 
-    return [f"Unknown command: '{cmd}'. Type 'help' for commands."]
+    # check if query command doesn't have ticker
+    query_matches = [c for c in QUERY_COMMAND_MAP if c.startswith(cmd)]
+    if query_matches and not _active_ticker:
+        return ["No ticker selected. Run 'ticker' first."]
+
+    return [f"Unknown: '{cmd}'. Type 'help'."]
 
 def _main():
     global cmd_session, form_session, parser_ctx
 
-    cmd_session = PromptSession(
-        completer=WordCompleter(COMMANDS, ignore_case=True, sentence=True),
-        key_bindings=kb,
-    )
+    cmd_session = PromptSession(key_bindings=kb)
     form_session = PromptSession(key_bindings=kb)
 
     print(_header_line())
-    print("CHEESECLOTH")
+    print("CHEESECLOTH - SEC Filing Explorer")
     print(_header_line())
 
-    # keep one parser alive for the entire session
     conn = get_connection()
     parser_ctx = SECFilingParser(conn, max_retries=3, timeout=30.0).__enter__()
 
@@ -335,20 +431,20 @@ def _main():
         _reset_ui()
         tickers = get_available_tickers()
         if tickers:
-            _add_ui(
-                "Run 'ticker' to select one, or 'help' for all commands.",
-            )
+            _add_ui("Run 'ticker' to select one, or 'help' for commands.")
         else:
             _add_ui(
-                "No tickers in the database yet.",
-                "",
-                "Run 'ticker' into 'add' to scrape your first company.",
+                "No tickers in database.",
+                "Run 'ticker' then 'add' to scrape your first company.",
             )
         _render()
 
         while True:
             try:
-                raw = cmd_session.prompt("\n> ").strip()
+                available_cmds = _get_available_commands()
+                completer = WordCompleter(available_cmds, ignore_case=True, sentence=True)
+                
+                raw = cmd_session.prompt("\n> ", completer=completer).strip()
                 result = _process_command(raw)
                 if result:
                     _reset_ui()
