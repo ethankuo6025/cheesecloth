@@ -1,0 +1,96 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cheesecloth — SEC Filing Explorer</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+</head>
+<body>
+    <header class="top-bar">
+        <div class="brand">CHEESECLOTH</div>
+        <div class="controls-row">
+            <div class="ticker-selectors">
+                <div class="ticker-group">
+                    <label>Primary</label>
+                    <select id="ticker-primary"><option value="">— select —</option></select>
+                </div>
+                <div class="ticker-group">
+                    <label>Compare</label>
+                    <select id="ticker-compare"><option value="">— none —</option></select>
+                </div>
+            </div>
+            <button id="btn-add-ticker" class="btn btn-accent">+ Add Ticker</button>
+        </div>
+    </header>
+
+    <nav class="metric-bar">
+        <div class="metric-tabs" id="metric-tabs"></div>
+        <div class="mode-toggle">
+            <button class="mode-btn active" data-mode="annual">Annual</button>
+            <button class="mode-btn" data-mode="quarterly">Quarterly</button>
+            <button class="mode-btn" data-mode="all">All</button>
+        </div>
+    </nav>
+
+    <main class="dashboard">
+        <section class="chart-panel">
+            <div class="chart-toolbar">
+                <h2 id="chart-title">Select a ticker and metric</h2>
+                <label class="toggle-label" id="normalize-wrap" style="display:none;">
+                    <input type="checkbox" id="normalize-toggle">
+                    <span>Normalize at first overlap</span>
+                </label>
+            </div>
+            <div class="chart-container">
+                <canvas id="main-chart"></canvas>
+                <div class="chart-empty" id="chart-empty" style="display:none;">
+                    <div class="chart-empty-icon">📭</div>
+                    <p class="chart-empty-title" id="chart-empty-title">No data</p>
+                    <p class="chart-empty-sub" id="chart-empty-sub"></p>
+                </div>
+            </div>
+        </section>
+
+        <section class="stats-panel">
+            <h3>Statistics</h3>
+            <div class="stats-grid" id="stats-grid">
+                <p class="stats-placeholder">Select a metric to view statistics.</p>
+            </div>
+        </section>
+
+        <section class="table-panel">
+            <div class="table-tabs">
+                <button class="table-tab active" data-target="table-primary" id="tab-primary">Data</button>
+                <button class="table-tab" data-target="table-compare" id="tab-compare" style="display:none;">Compare</button>
+            </div>
+            <div class="table-scroll">
+                <table class="data-table" id="table-primary"><thead><tr></tr></thead><tbody></tbody></table>
+                <table class="data-table" id="table-compare" style="display:none;"><thead><tr></tr></thead><tbody></tbody></table>
+            </div>
+        </section>
+    </main>
+
+    <!-- Add-ticker modal -->
+    <div class="modal-overlay" id="modal-add" style="display:none;">
+        <div class="modal">
+            <h3>Add New Ticker</h3>
+            <p>Enter a ticker symbol to scrape from SEC EDGAR.</p>
+            <input type="text" id="input-new-ticker" placeholder="e.g. AAPL" maxlength="10">
+            <div class="modal-actions">
+                <button class="btn" id="btn-cancel-add">Cancel</button>
+                <button class="btn btn-accent" id="btn-confirm-add">Scrape</button>
+            </div>
+            <p class="modal-status" id="modal-status"></p>
+        </div>
+    </div>
+
+    <!-- Toast container for background scrape jobs -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
