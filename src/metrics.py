@@ -15,6 +15,9 @@ UNIT_IDX = 6
 DECIMALS_IDX = 7
 ACCESSION_IDX = 8
 
+def _safe_div(a: float, b: float) -> float | None:
+    return None if b == 0 else a / b
+
 def _safe_pct(a: float, b: float) -> float | None:
     return None if b == 0 else (a / b) * 100
 
@@ -44,6 +47,102 @@ METRICS_REGISTRY: dict[str, MetricDefinition] = {
         ),
         compute=lambda v: _safe_pct(v[0], v[1]),
     ),
+    "operating_margin": MetricDefinition(
+        key="operating_margin",
+        display_name="Operating Margin",
+        inputs=(
+            MetricInput("operating_income", "operating"),
+            MetricInput("revenue", "revenue"),
+        ),
+        compute=lambda v: _safe_pct(v[0], v[1]),
+    ),
+    "profit_margin": MetricDefinition(
+        key="profit_margin",
+        display_name="Profit Margin",
+        inputs=(
+            MetricInput("net_income", "net"),
+            MetricInput("revenue", "revenue"),
+        ),
+        compute=lambda v: _safe_pct(v[0], v[1]),
+    ),
+    "cash_to_assets": MetricDefinition(
+        key="cash_to_assets",
+        display_name="Cash/Assets",
+        inputs=(
+            MetricInput("cash", "cash_on_hand"),
+            MetricInput("total_assets", "total_assets"),
+        ),
+        compute=lambda v: _safe_pct(v[0], v[1]),
+    ),
+    "debt_to_assets": MetricDefinition(
+        key="debt_to_assets",
+        display_name="Debt/Assets",
+        inputs=(
+            MetricInput("long_term_debt", "long_term_debt"),
+            MetricInput("total_assets", "total_assets"),
+        ),
+        compute=lambda v: _safe_pct(v[0], v[1]),
+    ),
+    "debt_to_equity": MetricDefinition(
+        key="debt_to_equity",
+        display_name="Debt/Equity",
+        inputs=(
+            MetricInput("long_term_debt", "long_term_debt"),
+            MetricInput("equity", "equity"),
+        ),
+        compute=lambda v: _safe_div(v[0], v[1]),
+        format_type="multiple",
+    ),
+    "current_ratio": MetricDefinition(
+        key="current_ratio",
+        display_name="Current Ratio",
+        inputs=(
+            MetricInput("current_assets", "current_assets"),
+            MetricInput("current_liabilities", "current_liabilities"),
+        ),
+        compute=lambda v: _safe_div(v[0], v[1]),
+        format_type="multiple",
+    ),
+    "net_debt": MetricDefinition(
+        key="net_debt",
+        display_name="Net Debt",
+        inputs=(
+            MetricInput("long_term_debt", "long_term_debt"),
+            MetricInput("cash", "cash_on_hand"),
+        ),
+        compute=lambda v: v[0] - v[1],
+        format_type="currency",
+    ),
+    "working_capital": MetricDefinition(
+        key="working_capital",
+        display_name="Working Capital",
+        inputs=(
+            MetricInput("current_assets", "current_assets"),
+            MetricInput("current_liabilities", "current_liabilities"),
+        ),
+        compute=lambda v: v[0] - v[1],
+        format_type="currency",
+    ),
+    "roa": MetricDefinition(
+        key="roa",
+        display_name="Return on Assets",
+        inputs=(
+            MetricInput("net_income", "net"),
+            MetricInput("total_assets", "total_assets"),
+        ),
+        compute=lambda v: _safe_pct(v[0], v[1]),
+        match_by_end_date=True,
+    ),
+    "roe": MetricDefinition(
+        key="roe",
+        display_name="Return on Equity",
+        inputs=(
+            MetricInput("net_income", "net"),
+            MetricInput("equity", "equity"),
+        ),
+        compute=lambda v: _safe_pct(v[0], v[1]),
+        match_by_end_date=True,
+    )
 }
 
 def _get_period_key(fact: tuple, by_end_date: bool = False) -> tuple | None:
@@ -62,7 +161,6 @@ def _get_period_key(fact: tuple, by_end_date: bool = False) -> tuple | None:
         return ("duration", start, end)
     return None
 
-
 def _parse_value(value) -> float | None:
     if value is None:
         return None
@@ -71,7 +169,6 @@ def _parse_value(value) -> float | None:
     except (ValueError, TypeError):
         return None
 
-
 def _build_period_index(facts: list[tuple], by_end_date: bool = False) -> dict[tuple, tuple]:
     index: dict[tuple, tuple] = {}
     for fact in facts:
@@ -79,7 +176,6 @@ def _build_period_index(facts: list[tuple], by_end_date: bool = False) -> dict[t
         if key and key not in index:
             index[key] = fact
     return index
-
 
 def calculate_metric(ticker: str, metric_key: str, query_type: str) -> list[tuple]:
     """Fetch inputs, match by period, compute metric, return fact-like tuples."""
