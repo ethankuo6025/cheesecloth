@@ -33,9 +33,8 @@ class MetricDefinition:
     inputs: tuple[MetricInput, ...]
     compute: Callable[[list[float]], float | None]
     format_type: Literal["percentage", "ratio", "multiple", "currency"] = "percentage"
-    # when True, match inputs by end/instant date only instead of exact period.
-    # needed when mixing duration facts (e.g. net income) with instant facts (e.g. assets).
-    match_by_end_date: bool = False
+    match_by_end_date: bool = False # needed when mixing duration facts
+
 
 METRICS_REGISTRY: dict[str, MetricDefinition] = {
     "gross_margin": MetricDefinition(
@@ -177,8 +176,9 @@ def _build_period_index(facts: list[tuple], by_end_date: bool = False) -> dict[t
             index[key] = fact
     return index
 
+
 def calculate_metric(ticker: str, metric_key: str, query_type: str) -> list[tuple]:
-    """Fetch inputs, match by period, compute metric, return fact-like tuples."""
+    """fetch inputs, match by period, compute metric, return fact-like tuples."""
     if metric_key not in METRICS_REGISTRY:
         raise ValueError(f"Unknown metric: {metric_key!r}")
 
@@ -234,7 +234,7 @@ def calculate_metric(ticker: str, metric_key: str, query_type: str) -> list[tupl
                 ))
 
     results.sort(
-        key=lambda r: r[INSTANT_DATE_IDX] or r[END_DATE_IDX] or r[START_DATE_IDX],
+        key=lambda r: r[INSTANT_DATE_IDX] or r[END_DATE_IDX],
         reverse=True,
     )
     return results
