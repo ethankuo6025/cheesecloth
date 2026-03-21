@@ -9,6 +9,7 @@ from parser import SECFilingParser, TickerNotFoundError
 from add import parse_and_store
 from db import get_available_tickers, get_connection
 from helpers import get_facts
+from metrics import calculate_metric, METRICS_REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,12 @@ BASE_COMMANDS = ["ticker", "mode", "help", "quit"]
 QUERY_COMMANDS = [
     "revenue", "eps", "gross", "operating", "net",
     "liabilities", "assets", "cash", "debt", "shares",
+]
+METRIC_COMMANDS = [
+    "gross_margin", "op_margin", "profit_margin",
+    "cash_ratio", "debt_ratio", "debt_equity",
+    "current_ratio", "net_debt", "working_cap",
+    "roa", "roe",
 ]
 
 ui_state = []
@@ -47,7 +54,7 @@ def _add_ui(*lines):
 def _get_available_commands() -> list[str]:
     """Returns commands available based on current state."""
     if _active_ticker:
-        return BASE_COMMANDS + QUERY_COMMANDS
+        return BASE_COMMANDS + QUERY_COMMANDS + METRIC_COMMANDS
     return BASE_COMMANDS
 
 def _render():
@@ -165,8 +172,7 @@ def _prompt_ticker_selection() -> str | None:
             continue
 
         if val == "add":
-            new_ticker = _prompt_and_scrape_ticker()
-            return new_ticker
+            return _prompt_and_scrape_ticker()
 
         if val.isdigit():
             idx = int(val)
@@ -201,7 +207,14 @@ def _format_table(headers: list[str], rows: list[tuple]) -> list[str]:
         lines.append("  " + fmt.format(*(str(c) if c is not None else "" for c in row)))
     return lines
 
-def _format_fact_rows(raw_rows, is_per_share=False, is_count=False) -> list[tuple]:
+
+def _format_fact_rows(
+    raw_rows,
+    is_per_share: bool = False,
+    is_count: bool = False,
+    is_percentage: bool = False,
+    is_multiple: bool = False,
+) -> list[tuple]:
     """converts raw DB rows into display tuples."""
     out = []
     for row in raw_rows:
@@ -217,8 +230,13 @@ def _format_fact_rows(raw_rows, is_per_share=False, is_count=False) -> list[tupl
 
         # format numeric value
         try:
-            numeric = float(value)
-            if is_per_share:
+            numeric = float(value) if not isinstance(value, (int, float)) else value
+            
+            if is_percentage:
+                value_str = f"{numeric:.2f}%"
+            elif is_multiple:
+                value_str = f"{numeric:.2f}x"
+            elif is_per_share:
                 value_str = f"${numeric:.2f}"
             elif is_count:
                 if abs(numeric) >= 1_000_000_000:
@@ -230,14 +248,16 @@ def _format_fact_rows(raw_rows, is_per_share=False, is_count=False) -> list[tupl
                 else:
                     value_str = f"{numeric:,.0f}"
             else:
-                if abs(numeric) >= 1_000_000_000:
-                    value_str = f"${numeric / 1_000_000_000:.2f}B"
-                elif abs(numeric) >= 1_000_000:
-                    value_str = f"${numeric / 1_000_000:.2f}M"
-                elif abs(numeric) >= 1_000:
-                    value_str = f"${numeric / 1_000:.2f}K"
+                sign = "-" if numeric < 0 else ""
+                abs_numeric = abs(numeric)
+                if abs_numeric >= 1_000_000_000:
+                    value_str = f"{sign}${abs_numeric / 1_000_000_000:.2f}B"
+                elif abs_numeric >= 1_000_000:
+                    value_str = f"${abs_numeric / 1_000_000:.2f}M"
+                elif abs_numeric >= 1_000:
+                    value_str = f"${abs_numeric / 1_000:.2f}K"
                 else:
-                    value_str = f"${numeric:,.2f}"
+                    value_str = f"{sign}${abs_numeric:,.2f}"
         except (TypeError, ValueError):
             value_str = str(value) if value is not None else "-"
 
@@ -256,15 +276,10 @@ def _cmd_ticker() -> list[str]:
 
     global _active_ticker
     _active_ticker = ticker
-    return [
-        f"Active ticker set to {ticker}.",
-        "",
-        "Available queries: revenue, eps, gross, operating, net,",
-        "                   liabilities, assets, cash, debt, shares",
-    ]
+    return [f"Active ticker set to {ticker}. Type 'help' for commands."]
+
 
 def _cmd_mode() -> list[str]:
-    """toggle or set query mode for date range filtering."""
     global _query_mode
     
     print("\n── Query Mode ──")
@@ -292,16 +307,40 @@ def _cmd_mode() -> list[str]:
 
 def _cmd_query(query: str, display_name: str, is_per_share: bool = False, is_count: bool = False) -> list[str]:
     """show queried facts for the active ticker."""
-    ticker = _active_ticker
     mode_label = _query_mode.upper()
-    raw = get_facts(ticker, query, _query_mode)  # type: ignore
+    raw = get_facts(_active_ticker, query, _query_mode)  # type: ignore
 
     if not raw:
-        return [f"No {display_name.lower()} data for {ticker} ({mode_label})."]
+        return [f"No {display_name.lower()} data for {_active_ticker} ({mode_label})."]
 
     rows = _format_fact_rows(raw, is_per_share=is_per_share, is_count=is_count)
     headers = ["Period", display_name, "Unit", "Accession"]
-    lines = [f"{display_name} - {ticker} ({mode_label})", ""]
+    lines = [f"{display_name} - {_active_ticker} ({mode_label})", ""]
+    lines += _format_table(headers, rows)
+    lines += ["", f"  {len(rows)} record(s)."]
+    return lines
+
+def _cmd_metric(metric_key: str) -> list[str]:
+    defn = METRICS_REGISTRY.get(metric_key)
+    if not defn:
+        return [f"Unknown metric: {metric_key}"]
+    
+    mode_label = _query_mode.upper()
+    
+    try:
+        raw = calculate_metric(_active_ticker, metric_key, _query_mode)  # type: ignore
+    except ValueError as e:
+        return [f"Error: {e}"]
+
+    if not raw:
+        return [f"No {defn.display_name.lower()} data for {_active_ticker} ({mode_label})."]
+
+    is_pct = defn.format_type == "percentage"
+    is_mult = defn.format_type == "multiple"
+    
+    rows = _format_fact_rows(raw, is_percentage=is_pct, is_multiple=is_mult)
+    headers = ["Period", defn.display_name, "Unit", "Accession"]
+    lines = [f"{defn.display_name} - {_active_ticker} ({mode_label})", ""]
     lines += _format_table(headers, rows)
     lines += ["", f"  {len(rows)} record(s)."]
     return lines
@@ -317,21 +356,18 @@ def _cmd_help() -> list[str]:
     ]
     if _active_ticker:
         lines += [
-            "QUERIES (requires ticker)",
-            "  revenue, gross, operating, net, eps",
-            "  assets, liabilities, cash, debt, shares",
+            "QUERIES",
+            "  revenue, gross, operating, net, eps,",
+            "  assets, liabilities, cash, debt, shares,",
+            "  gross_margin, op_margin, profit_margin,",
+            "  cash_ratio, debt_ratio, debt_equity, current_ratio,",
+            "  net_debt, working_cap, roa, roe",
         ]
     else:
-        lines += ["Run 'ticker' first to enable financial queries."]
+        lines += ["Run 'ticker' first to enable queries."]
     
-    lines += [
-        "",
-        "KEYS: Ctrl+C exit | Ctrl+Z cancel",
-    ]
+    lines += ["", "KEYS: Ctrl+C exit | Ctrl+Z cancel"]
     return lines
-
-def _get_active_ticker() -> str | None:
-    return _active_ticker
 
 def _cmd_revenue():
     return _cmd_query(query="revenue", display_name="Revenue")
@@ -382,6 +418,20 @@ QUERY_COMMAND_MAP = {
     "shares":      _cmd_shares,
 }
 
+METRIC_COMMAND_KEYS = {
+    "gross_margin": "gross_margin",
+    "op_margin": "operating_margin",
+    "profit_margin": "profit_margin",
+    "cash_ratio": "cash_to_assets",
+    "debt_ratio": "debt_to_assets",
+    "debt_equity": "debt_to_equity",
+    "current_ratio": "current_ratio",
+    "net_debt": "net_debt",
+    "working_cap": "working_capital",
+    "roa": "roa",
+    "roe": "roe",
+}
+
 def _process_command(cmd: str) -> list[str]:
     cmd = cmd.strip().lower()
     if not cmd:
@@ -398,8 +448,17 @@ def _process_command(cmd: str) -> list[str]:
             return ["No ticker selected. Run 'ticker' first."]
         return QUERY_COMMAND_MAP[cmd]()
 
+    if cmd in METRIC_COMMAND_KEYS:
+        if not _active_ticker:
+            return ["No ticker selected. Run 'ticker' first."]
+        return _cmd_metric(METRIC_COMMAND_KEYS[cmd])
+
     # prefix matching
-    all_commands = {**BASE_COMMAND_MAP, **(QUERY_COMMAND_MAP if _active_ticker else {})}
+    all_commands = set(BASE_COMMAND_MAP)
+    if _active_ticker:
+        all_commands.update(QUERY_COMMAND_MAP)
+        all_commands.update(METRIC_COMMAND_KEYS)
+    
     matches = [c for c in all_commands if c.startswith(cmd)]
     
     if len(matches) == 1:
@@ -408,8 +467,8 @@ def _process_command(cmd: str) -> list[str]:
         return [f"Ambiguous: {', '.join(matches)}"]
 
     # check if query command doesn't have ticker
-    query_matches = [c for c in QUERY_COMMAND_MAP if c.startswith(cmd)]
-    if query_matches and not _active_ticker:
+    ticker_cmds = set(QUERY_COMMAND_MAP) | set(METRIC_COMMAND_KEYS)
+    if any(c.startswith(cmd) for c in ticker_cmds) and not _active_ticker:
         return ["No ticker selected. Run 'ticker' first."]
 
     return [f"Unknown: '{cmd}'. Type 'help'."]

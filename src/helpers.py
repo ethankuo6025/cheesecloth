@@ -52,7 +52,23 @@ qnames_mapping = {
         "us-gaap:LongTermDebtNoncurrent",
         "us-gaap:LongTermDebt",
         "us-gaap:LongTermDebtAndCapitalLeaseObligations"
-    ]
+    ],
+    "equity": [
+        "us-gaap:StockholdersEquity",
+        "us-gaap:StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+        "us-gaap:CommonStockholdersEquity",
+    ],
+    "current_assets": [
+        "us-gaap:AssetsCurrent",
+    ],
+    "current_liabilities": [
+        "us-gaap:LiabilitiesCurrent",
+    ],
+    "total_debt": [
+        "us-gaap:DebtAndCapitalLeaseObligations",
+        "us-gaap:LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities",
+        "us-gaap:Debt",
+    ],
 }
 
 VALUE_IDX = 2
@@ -62,15 +78,7 @@ END_DATE_IDX = 5
 ACC_IDX = 8
 
 def _filter_dedup_and_sort(facts: list[tuple], query_type: str) -> list[tuple]:
-    """
-    Filter and deduplicate facts based on query type.
-    
-    - Instant date facts are ALWAYS included regardless of query_type
-    - Duration facts are filtered based on query_type:
-      - "annual": date ranges > 350 days
-      - "quarterly": date ranges < 100 days  
-      - "all": no filtering
-    """
+    """filter and deduplicate facts based on query type."""
     seen, deduped = set(), []
     for f in facts:
         period = f[INST_DATE_IDX] or (f[START_DATE_IDX], f[END_DATE_IDX])
