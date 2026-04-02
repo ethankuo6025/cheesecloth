@@ -8,8 +8,7 @@ from prompt_toolkit.shortcuts import clear as clear_screen
 from parser import SECFilingParser, TickerNotFoundError
 from add import parse_and_store
 from db import get_available_tickers, get_connection
-from helpers import get_facts
-from metrics import calculate_metric, METRICS_REGISTRY
+from query import resolve, REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -308,7 +307,7 @@ def _cmd_mode() -> list[str]:
 def _cmd_query(query: str, display_name: str, is_per_share: bool = False, is_count: bool = False) -> list[str]:
     """show queried facts for the active ticker."""
     mode_label = _query_mode.upper()
-    raw = get_facts(_active_ticker, query, _query_mode)  # type: ignore
+    raw = resolve(_active_ticker, query, _query_mode)  # type: ignore
 
     if not raw:
         return [f"No {display_name.lower()} data for {_active_ticker} ({mode_label})."]
@@ -321,14 +320,14 @@ def _cmd_query(query: str, display_name: str, is_per_share: bool = False, is_cou
     return lines
 
 def _cmd_metric(metric_key: str) -> list[str]:
-    defn = METRICS_REGISTRY.get(metric_key)
+    defn = REGISTRY.get(metric_key)
     if not defn:
         return [f"Unknown metric: {metric_key}"]
-    
+
     mode_label = _query_mode.upper()
-    
+
     try:
-        raw = calculate_metric(_active_ticker, metric_key, _query_mode)  # type: ignore
+        raw = resolve(_active_ticker, metric_key, _query_mode)  # type: ignore
     except ValueError as e:
         return [f"Error: {e}"]
 
@@ -394,7 +393,7 @@ def _cmd_cash():
     return _cmd_query(query="cash_on_hand", display_name="Cash on Hand")
 
 def _cmd_debt():
-    return _cmd_query(query="long_term_debt", display_name="Long-Term Debt")
+    return _cmd_query(query="long_term_total_debt", display_name="Long-Term Debt")
 
 def _cmd_shares():
     return _cmd_query(query="shares_outstanding", display_name="Shares Outstanding", is_count=True)

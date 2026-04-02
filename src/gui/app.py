@@ -12,7 +12,7 @@ from decimal import Decimal
 from parser import SECFilingParser, TickerNotFoundError
 from add import parse_and_store
 from db import get_available_tickers, get_connection
-from helpers import get_facts, qnames_mapping
+from query import resolve, REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -228,10 +228,10 @@ def list_active_scrapes():
 def get_metric_facts(ticker, metric):
     ticker = ticker.upper()
     mode = request.args.get("mode", "annual")
-    if metric not in qnames_mapping:
+    if metric not in REGISTRY:
         return jsonify({"error": f"Unknown metric: {metric}"}), 400
     try:
-        raw = get_facts(ticker, metric, mode)
+        raw = resolve(ticker, metric, mode)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify({
@@ -251,7 +251,7 @@ def list_metrics():
         "liabilities":        {"label": "Total Liabilities",  "is_per_share": False, "is_count": False},
         "total_assets":       {"label": "Total Assets",       "is_per_share": False, "is_count": False},
         "cash_on_hand":       {"label": "Cash on Hand",       "is_per_share": False, "is_count": False},
-        "long_term_debt":     {"label": "Long-Term Debt",     "is_per_share": False, "is_count": False},
+        "long_term_total_debt": {"label": "Long-Term Total Debt", "is_per_share": False, "is_count": False},
         "shares_outstanding": {"label": "Shares Outstanding", "is_per_share": False, "is_count": True},
     })
 
