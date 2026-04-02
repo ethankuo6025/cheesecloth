@@ -140,30 +140,66 @@ def get_available_tickers() -> list[tuple]:
         )
         return cursor.fetchall()
 
-def query_facts_by_qname(ticker: str, qname: str) -> list[tuple]:
-    """fetch facts for a ticker and qname"""
+def query_facts(ticker: str, qnames: list[str], query_type: str) -> list[tuple]:
+    """Fetch facts for a ticker, picking the highest-priority qname per filing,
+    filtering by period type, deduplicating by period, and sorting by date."""
     with get_cursor(write=False) as cursor:
         cursor.execute(
             """
-            SELECT
-                f.local_name,
-                f.period_type,
-                f.value,
-                f.instant_date,
-                f.start_date,
-                f.end_date,
-                f.unit,
-                f.decimals,
-                f.accession_number
-            FROM facts f
-            JOIN companies c ON c.cik = f.cik
-            WHERE c.ticker = %s
-              AND f.qname LIKE %s
-              AND f.dimensions = '{}'::jsonb
-            ORDER BY
-                COALESCE(f.end_date, f.instant_date) DESC NULLS LAST
+            WITH
+            ranked_facts AS (
+                SELECT
+                    f.local_name,
+                    f.period_type,
+                    f.value,
+                    f.instant_date,
+                    f.start_date,
+                    f.end_date,
+                    f.unit,
+                    f.decimals,
+                    f.accession_number,
+                    array_position(%s::text[], f.qname) AS qname_rank
+                FROM facts f
+                JOIN companies c ON c.cik = f.cik
+                WHERE c.ticker = %s
+                  AND f.qname = ANY(%s::text[])
+                  AND f.dimensions = '{}'::jsonb
+            ),
+            best_qname_per_filing AS (
+                SELECT accession_number, MIN(qname_rank) AS best_rank
+                FROM ranked_facts
+                GROUP BY accession_number
+            ),
+            filtered_facts AS (
+                SELECT rf.local_name, rf.period_type, rf.value,
+                       rf.instant_date, rf.start_date, rf.end_date,
+                       rf.unit, rf.decimals, rf.accession_number
+                FROM ranked_facts rf
+                JOIN best_qname_per_filing bq
+                    ON rf.accession_number = bq.accession_number
+                   AND rf.qname_rank = bq.best_rank
+                WHERE
+                    rf.instant_date IS NOT NULL
+                    OR (rf.start_date IS NOT NULL AND rf.end_date IS NOT NULL AND (
+                        %s = 'all'
+                        OR (%s = 'annual'    AND (rf.end_date - rf.start_date) > 350)
+                        OR (%s = 'quarterly' AND (rf.end_date - rf.start_date) < 100)
+                    ))
+                    OR (rf.instant_date IS NULL AND rf.start_date IS NULL AND rf.end_date IS NULL)
+            ),
+            deduped AS (
+                SELECT DISTINCT ON (instant_date, start_date, end_date)
+                    local_name, period_type, value,
+                    instant_date, start_date, end_date,
+                    unit, decimals, accession_number
+                FROM filtered_facts
+                ORDER BY instant_date, start_date, end_date, accession_number
+            )
+            SELECT *
+            FROM deduped
+            ORDER BY COALESCE(end_date, instant_date, start_date) DESC NULLS LAST
             """,
-            (ticker.upper(), qname),
+            (qnames, ticker.upper(), qnames, query_type, query_type, query_type),
         )
         return cursor.fetchall()
 
