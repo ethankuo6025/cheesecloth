@@ -1,6 +1,5 @@
 from typing import Any
 from time import sleep, monotonic
-from arelle.utils.PluginHooks import PluginHooks
 from urllib.parse import urlparse
 import threading
 
@@ -40,7 +39,7 @@ def wait(url: str):
 
     return True
 
-class RateLimiter(PluginHooks):
+class RateLimiter:
     @staticmethod
     def TransformURLOptions(
         cntlr, 
