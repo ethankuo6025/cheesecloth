@@ -50,6 +50,7 @@ def store_facts(
         ticker = facts[0].ticker
         filing_params = [(filing.cik, filing.accession_number) for filing in filings]
 
+        # make sure the cik exists
         with conn.cursor() as cur:
             cur.execute("SELECT 1 FROM companies WHERE cik = %s", (cik,))
             company_exists = cur.fetchall()
