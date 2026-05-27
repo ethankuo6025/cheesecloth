@@ -376,7 +376,7 @@ class SECFilingParser:
             for fact in models[0].factsInInstance:
                 try:
                     parsed = self._parse_fact(fact, ticker, cik, accession_number)
-                    if parsed.value is not None:
+                    if parsed.value is not None: 
                         parsed_facts.append(parsed)
                 except SECFilingParserError as e:
                     logger.debug("skip fact: %s", e)
