@@ -140,9 +140,16 @@ def get_available_tickers() -> list[tuple]:
         )
         return cursor.fetchall()
 
-def query_facts(ticker: str, qnames: list[str], query_type: str) -> list[tuple]:
-    """Fetch facts for a ticker, picking the highest-priority qname per filing,
-    filtering by period type, deduplicating by period, and sorting by date."""
+def query_facts(
+    ticker: str,
+    qnames: list[str],
+    query_type: str,
+    fact_kind: str = "numeric",
+) -> list[tuple]:
+    """
+    fetch facts for a ticker, picking the highest-priority qname per filing,
+    filtering by period type and fact kind, deduplicating, and sorting by date.
+    """
     with get_cursor(write=False) as cursor:
         cursor.execute(
             """
@@ -164,6 +171,11 @@ def query_facts(ticker: str, qnames: list[str], query_type: str) -> list[tuple]:
                 WHERE c.ticker = %s
                   AND f.qname = ANY(%s::text[])
                   AND f.dimensions = '{}'::jsonb
+                  AND (
+                      %s = 'all'
+                      OR (%s = 'numeric' AND f.unit IS NOT NULL)
+                      OR (%s = 'textual'  AND f.unit IS NULL)
+                  )
             ),
             best_qname_per_filing AS (
                 SELECT accession_number, MIN(qname_rank) AS best_rank
@@ -199,7 +211,11 @@ def query_facts(ticker: str, qnames: list[str], query_type: str) -> list[tuple]:
             FROM deduped
             ORDER BY COALESCE(end_date, instant_date, start_date) DESC NULLS LAST
             """,
-            (qnames, ticker.upper(), qnames, query_type, query_type, query_type),
+            (
+                qnames, ticker.upper(), qnames,
+                fact_kind, fact_kind, fact_kind,
+                query_type, query_type, query_type,
+            ),
         )
         return cursor.fetchall()
 
