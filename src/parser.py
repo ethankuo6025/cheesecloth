@@ -50,17 +50,9 @@ class Filing:
     entry_file: str
     filing_type: str
 
-def _is_quantitative(parsed: ParsedFact) -> bool:
-    """return True only if the fact has a unit and a numeric value."""
-    if parsed.unit is None:
-        return False
-    if parsed.value is None:
-        return False
-    try:
-        float(parsed.value.replace(",", ""))
-    except (ValueError, AttributeError):
-        return False    
-    return True
+def _has_value(parsed: ParsedFact) -> bool:
+    """keep any fact with a non-null value, both numeric and textual."""
+    return parsed.value is not None
 
 class SECFilingParserError(Exception):
     pass
@@ -369,12 +361,12 @@ class SECFilingParser:
         ticker: str,
         cik: str,
     ) -> list[ParsedFact]:
-        """parse a single filing and return its facts."""
+        """parse a filing and return all facts, both numeric and textual."""
         accession_number = filing.accession_number
         filename = filing.entry_file
         accession_number_nd = accession_number.replace("-", "")
         url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_number_nd}/{filename}"
-        
+
         self._options.entrypointFile = url
 
         try:
@@ -384,12 +376,11 @@ class SECFilingParser:
                 if not models:
                     raise SECFilingParserError(f"No models loaded from {url}")
 
-            facts = list(models[0].factsInInstance)
             parsed_facts: list[ParsedFact] = []
-            for fact in facts:
+            for fact in models[0].factsInInstance:
                 try:
                     parsed = self._parse_fact(fact, ticker, cik, accession_number)
-                    if _is_quantitative(parsed):
+                    if _has_value(parsed):
                         parsed_facts.append(parsed)
                 except SECFilingParserError as e:
                     logger.debug("skip fact: %s", e)
@@ -400,3 +391,4 @@ class SECFilingParser:
             raise
         except Exception as e:
             raise SECFilingParserError(f"Error parsing {url}: {e}") from e
+
