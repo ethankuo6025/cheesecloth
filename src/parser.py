@@ -50,10 +50,6 @@ class Filing:
     entry_file: str
     filing_type: str
 
-def _has_value(parsed: ParsedFact) -> bool:
-    """keep any fact with a non-null value, both numeric and textual."""
-    return parsed.value is not None
-
 class SECFilingParserError(Exception):
     pass
 
@@ -380,8 +376,7 @@ class SECFilingParser:
             for fact in models[0].factsInInstance:
                 try:
                     parsed = self._parse_fact(fact, ticker, cik, accession_number)
-                    if _has_value(parsed):
-                        parsed_facts.append(parsed)
+                    parsed_facts.append(parsed)
                 except SECFilingParserError as e:
                     logger.debug("skip fact: %s", e)
 
