@@ -29,10 +29,9 @@ class Concepts:
     format_type: Literal["percentage", "ratio", "multiple", "currency", "raw"] = "raw"
     match_by_end_date: bool = False
 
-
 REGISTRY: dict[str, Concepts] = {
 
-    '''components'''
+    # components
 
     "revenue_goods": Concepts(
         key="revenue_goods",
@@ -92,7 +91,7 @@ REGISTRY: dict[str, Concepts] = {
         ],
     ),
 
-    '''totals'''
+    # totals
 
     "revenue": Concepts(
         key="revenue",
@@ -200,7 +199,7 @@ REGISTRY: dict[str, Concepts] = {
         ],
     ),
 
-    '''metrics'''
+    # metrics
 
     "gross_margin": Concepts(
         key="gross_margin",
@@ -293,7 +292,6 @@ REGISTRY: dict[str, Concepts] = {
         match_by_end_date=True,
     ),
 }
-
 
 def _get_period_key(fact: tuple, by_end_date: bool = False) -> tuple | None:
     instant = fact[INSTANT_DATE_IDX]
@@ -428,12 +426,11 @@ def _resolve_formula(
 
 
 def resolve(ticker: str, key: str, query_type: str) -> list[tuple]:
-    """Resolve a metric to fact-like tuples, trying each resolution strategy in order."""
+    """resolve a metric to fact-like tuples, trying each resolution strategy in order."""
     if key not in REGISTRY:
         raise ValueError(f"Unknown metric: {key!r}")
 
     metric = REGISTRY[key]
-
     for resolution in metric.resolutions:
         if isinstance(resolution, list):
             result = query_facts(ticker, resolution, query_type)
