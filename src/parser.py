@@ -1,26 +1,23 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 from typing import Any, cast
+
 import httpx
-import os
-from dotenv import load_dotenv
-from psycopg import Connection
-import rate_limiter
 from arelle.api.Session import Session
 from arelle.RuntimeOptions import RuntimeOptions
-from personal_header import header
-import logging
+from psycopg import Connection
+
+import config
+import rate_limiter
+
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-
 logger = logging.getLogger(__name__)
-load_dotenv()
-
-ARELLE_PLUGINS_PATH = os.getenv("ARELLE_PLUGINS_PATH")
 
 class PeriodType(Enum):
     INSTANT = "instant"
@@ -74,7 +71,7 @@ class SECFilingParser:
         self._ticker_to_cik: dict[str, str] | None = None
         self._client = httpx.Client(
             timeout=timeout,
-            headers= headers or header(),
+            headers=headers or config.sec_headers(),
             follow_redirects=True,
             transport=httpx.HTTPTransport(retries=max_retries),
         )
@@ -85,8 +82,14 @@ class SECFilingParser:
             logFile="logToStructuredMessage",
             logFormat="[%(messageCode)s] %(message)s - %(file)s",
             logLevel="WARNING",
-            plugins=f"{ARELLE_PLUGINS_PATH}|rate_limiter.py"
+            plugins=f"{config.ARELLE_PLUGINS_PATH}|rate_limiter.py",
         )
+
+    @property
+    def conn(self) -> Connection:
+        """The DB connection the parser was created with — exposed for callers
+        that need to perform additional work in the same transaction."""
+        return self._conn
 
     def close(self) -> None:
         self._client.close()
