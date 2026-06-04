@@ -8,21 +8,14 @@ from prompt_toolkit.shortcuts import clear as clear_screen
 from parser import SECFilingParser, TickerNotFoundError
 from add import parse_and_store
 from db import get_available_tickers, get_connection
-from query import resolve, REGISTRY
+import query
+from models import Metric
 
 logger = logging.getLogger(__name__)
 
-BASE_COMMANDS = ["ticker", "mode", "help", "quit"]
-QUERY_COMMANDS = [
-    "revenue", "eps", "gross", "operating", "net",
-    "liabilities", "assets", "cash", "debt", "shares",
-]
-METRIC_COMMANDS = [
-    "gross_margin", "op_margin", "profit_margin",
-    "cash_ratio", "debt_ratio", "debt_equity",
-    "current_ratio", "net_debt", "working_cap",
-    "roa", "roe",
-]
+BASE_COMMANDS = ["ticker", "mode", "map", "metrics", "help", "quit"]
+
+ALLOWED_FORMATS = {"percentage", "ratio", "currency", "number", "text"}
 
 ui_state = []
 cmd_session = None
@@ -32,6 +25,9 @@ parser_ctx = None  # global parser kept open for the session
 
 _active_ticker: str | None = None
 _query_mode: str = "annual"  # "annual", "quarterly", or "all"
+
+# Catalog of metrics, loaded once per session and refreshed when it changes.
+_catalog: list[Metric] | None = None
 
 class AbortInput(Exception):
     pass
@@ -50,10 +46,32 @@ def _add_ui(*lines):
     for line in lines:
         ui_state.extend(line if isinstance(line, list) else [str(line)])
 
+# ── Metric catalog ──
+
+def _get_catalog() -> list[Metric]:
+    global _catalog
+    if _catalog is None:
+        _catalog = query.get_metrics()
+    return _catalog
+
+def _refresh_catalog():
+    global _catalog
+    _catalog = None
+
+def _catalog_map() -> dict[str, Metric]:
+    return {m.key: m for m in _get_catalog()}
+
+def _short_value(val) -> str:
+    """a compact one-line preview of a fact value for the mapping browser."""
+    if val is None:
+        return "-"
+    s = str(val).strip().replace("\n", " ")
+    return (s[:18] + "…") if len(s) > 18 else s
+
 def _get_available_commands() -> list[str]:
-    """Returns commands available based on current state."""
+    """returns commands available based on current state."""
     if _active_ticker:
-        return BASE_COMMANDS + QUERY_COMMANDS + METRIC_COMMANDS
+        return BASE_COMMANDS + [m.key for m in _get_catalog()]
     return BASE_COMMANDS
 
 def _render():
@@ -207,14 +225,8 @@ def _format_table(headers: list[str], rows: list[tuple]) -> list[str]:
     return lines
 
 
-def _format_fact_rows(
-    raw_rows,
-    is_per_share: bool = False,
-    is_count: bool = False,
-    is_percentage: bool = False,
-    is_multiple: bool = False,
-) -> list[tuple]:
-    """converts raw DB rows into display tuples."""
+def _format_fact_rows(raw_rows, format_type: str = "currency") -> list[tuple]:
+    """converts raw DB rows into display tuples, formatted per the metric's type."""
     out = []
     for row in raw_rows:
         _, period_type, value, instant_date, start_date, end_date, unit, decimals, accession = row
@@ -227,17 +239,20 @@ def _format_fact_rows(
         else:
             date_str = "-"
 
+        if format_type == "text":
+            out.append((date_str, _short_value(value), unit or "-",
+                        accession[-8:] if accession else "-"))
+            continue
+
         # format numeric value
         try:
             numeric = float(value) if not isinstance(value, (int, float)) else value
-            
-            if is_percentage:
+
+            if format_type == "percentage":
                 value_str = f"{numeric:.2f}%"
-            elif is_multiple:
-                value_str = f"{numeric:.2f}x"
-            elif is_per_share:
-                value_str = f"${numeric:.2f}"
-            elif is_count:
+            elif format_type == "ratio":
+                value_str = f"{numeric:.2f}"
+            elif format_type == "number":
                 if abs(numeric) >= 1_000_000_000:
                     value_str = f"{numeric / 1_000_000_000:.2f}B"
                 elif abs(numeric) >= 1_000_000:
@@ -246,19 +261,19 @@ def _format_fact_rows(
                     value_str = f"{numeric / 1_000:.2f}K"
                 else:
                     value_str = f"{numeric:,.0f}"
-            else:
+            else:  # currency
                 sign = "-" if numeric < 0 else ""
                 abs_numeric = abs(numeric)
                 if abs_numeric >= 1_000_000_000:
                     value_str = f"{sign}${abs_numeric / 1_000_000_000:.2f}B"
                 elif abs_numeric >= 1_000_000:
-                    value_str = f"${abs_numeric / 1_000_000:.2f}M"
+                    value_str = f"{sign}${abs_numeric / 1_000_000:.2f}M"
                 elif abs_numeric >= 1_000:
-                    value_str = f"${abs_numeric / 1_000:.2f}K"
+                    value_str = f"{sign}${abs_numeric / 1_000:.2f}K"
                 else:
                     value_str = f"{sign}${abs_numeric:,.2f}"
         except (TypeError, ValueError):
-            value_str = str(value) if value is not None else "-"
+            value_str = _short_value(value)
 
         unit_str = unit or "-"
         accession_short = accession[-8:] if accession else "-"
@@ -280,155 +295,276 @@ def _cmd_ticker() -> list[str]:
 
 def _cmd_mode() -> list[str]:
     global _query_mode
-    
+
     print("\n── Query Mode ──")
     print(f"  Current: {_query_mode.upper()}")
     print("  1. annual  2. quarterly  3. all")
-    
+
     mode_completer = WordCompleter(
         ["annual", "quarterly", "all", "1", "2", "3"],
         ignore_case=True,
     )
-    
+
     val = form_session.prompt("  Select: ", completer=mode_completer).strip().lower()  # type: ignore
-    
+
     modes = {
         "1": "annual", "2": "quarterly", "3": "all",
         "annual": "annual", "quarterly": "quarterly", "all": "all",
         "a": "annual", "q": "quarterly"
     }
-    
+
     if val in modes:
         _query_mode = modes[val]
         return [f"Query mode: {_query_mode.upper()}"]
-    
+
     return [f"Invalid. Mode unchanged: {_query_mode.upper()}"]
 
-def _cmd_query(query: str, display_name: str, is_per_share: bool = False, is_count: bool = False) -> list[str]:
-    """show queried facts for the active ticker."""
-    mode_label = _query_mode.upper()
-    raw = resolve(_active_ticker, query, _query_mode)  # type: ignore
-
-    if not raw:
-        return [f"No {display_name.lower()} data for {_active_ticker} ({mode_label})."]
-
-    rows = _format_fact_rows(raw, is_per_share=is_per_share, is_count=is_count)
-    headers = ["Period", display_name, "Unit", "Accession"]
-    lines = [f"{display_name} - {_active_ticker} ({mode_label})", ""]
-    lines += _format_table(headers, rows)
-    lines += ["", f"  {len(rows)} record(s)."]
-    return lines
-
-def _cmd_metric(metric_key: str) -> list[str]:
-    defn = REGISTRY.get(metric_key)
-    if not defn:
-        return [f"Unknown metric: {metric_key}"]
-
+def _cmd_query(metric: Metric) -> list[str]:
+    """show queried facts for the active ticker, formatted per the catalog."""
     mode_label = _query_mode.upper()
 
     try:
-        raw = resolve(_active_ticker, metric_key, _query_mode)  # type: ignore
+        raw = query.resolve(_active_ticker, metric.key, _query_mode)  # type: ignore
     except ValueError as e:
         return [f"Error: {e}"]
 
     if not raw:
-        return [f"No {defn.display_name.lower()} data for {_active_ticker} ({mode_label})."]
+        # Distinguish "no mapping configured" from "mapped, but no rows".
+        if not query.get_metric_mappings(_active_ticker, metric.key):  # type: ignore
+            return [
+                f"No mapping for '{metric.display_name}' on {_active_ticker}.",
+                "Run 'map' to choose which reported concepts feed this metric.",
+            ]
+        return [f"No {metric.display_name.lower()} data for {_active_ticker} ({mode_label})."]
 
-    is_pct = defn.format_type == "percentage"
-    is_mult = defn.format_type == "multiple"
-    
-    rows = _format_fact_rows(raw, is_percentage=is_pct, is_multiple=is_mult)
-    headers = ["Period", defn.display_name, "Unit", "Accession"]
-    lines = [f"{defn.display_name} - {_active_ticker} ({mode_label})", ""]
+    rows = _format_fact_rows(raw, metric.format_type)
+    headers = ["Period", metric.display_name, "Unit", "Accession"]
+    lines = [f"{metric.display_name} - {_active_ticker} ({mode_label})", ""]
     lines += _format_table(headers, rows)
     lines += ["", f"  {len(rows)} record(s)."]
     return lines
+
+def _cmd_metrics() -> list[str]:
+    """list the metric catalog, marking which are mapped for the active ticker."""
+    catalog = _get_catalog()
+    lines = ["METRIC CATALOG", ""]
+
+    mapped: set[str] = set()
+    if _active_ticker:
+        mapped = {row[0] for row in query.get_mappings_for_ticker(_active_ticker)}
+
+    for m in catalog:
+        if _active_ticker:
+            tag = "✓" if m.key in mapped else " "
+            lines.append(f"  [{tag}] {m.key:<22} {m.display_name}")
+        else:
+            lines.append(f"      {m.key:<22} {m.display_name}")
+
+    if _active_ticker:
+        lines += ["", "✓ = mapped. Run 'map' to configure, or type a metric key to query."]
+    else:
+        lines += ["", "Select a ticker first to query or map these metrics."]
+    return lines
+
+# ── Mapping workflow ──
+
+def _create_metric() -> Metric | None:
+    """prompt for and create a new catalog metric."""
+    key = _prompt_str("  New metric key (e.g. inventory)", required=True)
+    assert key is not None
+    key = key.strip().lower()
+    if query.get_metric(key):
+        print(f"  Metric '{key}' already exists.")
+        return query.get_metric(key)
+
+    display = _prompt_str("  Display name", required=True)
+    fmt = _prompt_str(
+        "  Format [currency/number/percentage/ratio/text]",
+        default="currency",
+    )
+    if fmt not in ALLOWED_FORMATS:
+        print(f"  Unknown format '{fmt}', using 'currency'.")
+        fmt = "currency"
+
+    query.add_metric(key, display, fmt)
+    _refresh_catalog()
+    print(f"  Created metric '{key}'.")
+    return query.get_metric(key)
+
+def _select_metric_for_mapping() -> Metric | None:
+    """show the catalog and let the user pick a metric to map (or create one)."""
+    catalog = _get_catalog()
+    mapped = {row[0] for row in query.get_mappings_for_ticker(_active_ticker)}  # type: ignore
+
+    print(f"\n── Map Concepts: {_active_ticker} ──")
+    print("  Select a metric to map this company's reported concepts onto:\n")
+    for i, m in enumerate(catalog, 1):
+        tag = "✓" if m.key in mapped else " "
+        print(f"    {i:>2}. [{tag}] {m.key:<22} {m.display_name}")
+    print("\n  Enter a number or metric key, 'new' to add a metric, or Enter to cancel.")
+
+    completer = WordCompleter(
+        [m.key for m in catalog] + ["new"], ignore_case=True, sentence=True
+    )
+    val = form_session.prompt("  metric> ", completer=completer).strip()  # type: ignore
+    if not val:
+        return None
+    if val.lower() == "new":
+        return _create_metric()
+    if val.isdigit() and 1 <= int(val) <= len(catalog):
+        return catalog[int(val) - 1]
+    match = next((m for m in catalog if m.key.lower() == val.lower()), None)
+    if match:
+        return match
+    print(f"  Unknown metric: '{val}'.")
+    return None
+
+def _browse_and_select_concepts(ticker: str, metric: Metric) -> list[str]:
+    """browse the company's reported concepts and return chosen qnames in order."""
+    search: str | None = None
+    LIMIT = 40
+
+    while True:
+        concepts = query.get_company_concepts(ticker, search)
+        if not concepts:
+            if search:
+                print(f"  No concepts match '{search}'.")
+                search = None
+                continue
+            print("  This company has no reported concepts. Scrape it first.")
+            return []
+
+        shown = concepts[:LIMIT]
+        filt = f" (filter: '{search}')" if search else ""
+        print(f"\n  Concepts for {ticker}{filt} — pick which feed '{metric.display_name}':")
+        for i, (qname, local_name, count, latest) in enumerate(shown, 1):
+            print(
+                f"    {i:>3}. {local_name[:34]:<34} {qname[:42]:<42} "
+                f"{count:>4} facts  latest={_short_value(latest)}"
+            )
+        if len(concepts) > len(shown):
+            print(f"    ... {len(concepts) - len(shown)} more — use '/text' to filter.")
+
+        print("\n  Enter numbers to map (e.g. '1' or '1,3,5'; order sets priority),")
+        print("  '/text' to filter, or Enter to cancel.")
+
+        completer = WordCompleter(
+            [q for q, *_ in concepts], ignore_case=True, sentence=True
+        )
+        val = form_session.prompt("  concept> ", completer=completer).strip()  # type: ignore
+        if not val:
+            return []
+        if val.startswith("/"):
+            search = val[1:].strip() or None
+            continue
+
+        picks: list[str] = []
+        ok = True
+        for token in val.replace(" ", "").split(","):
+            if not token:
+                continue
+            if token.isdigit() and 1 <= int(token) <= len(shown):
+                picks.append(shown[int(token) - 1][0])
+            else:
+                match = next((q for q, *_ in concepts if q.lower() == token.lower()), None)
+                if match:
+                    picks.append(match)
+                else:
+                    print(f"  Invalid selection: '{token}'.")
+                    ok = False
+                    break
+        if ok and picks:
+            # de-duplicate while preserving order
+            seen: set[str] = set()
+            return [q for q in picks if not (q in seen or seen.add(q))]
+
+def _map_metric(metric: Metric) -> list[str]:
+    """view/add/remove mappings for one metric on the active ticker."""
+    ticker = _active_ticker
+    cik = query.get_cik_for_ticker(ticker)  # type: ignore
+    if not cik:
+        return [f"{ticker} is not in the database."]
+
+    while True:
+        existing = [
+            (q, p)
+            for k, _dn, q, p in query.get_mappings_for_ticker(ticker)  # type: ignore
+            if k == metric.key
+        ]
+        print(f"\n── {metric.display_name}  ({metric.key})  —  {ticker} ──")
+        if existing:
+            print("  Current mappings (priority order):")
+            for i, (q, p) in enumerate(existing, 1):
+                print(f"    {i}. {q}   (priority {p})")
+        else:
+            print("  No mappings yet.")
+        print("\n  'add' to map concepts, 'rm <n>' to remove, Enter to go back.")
+
+        val = form_session.prompt("  map> ").strip().lower()  # type: ignore
+        if not val:
+            return [f"Mappings for '{metric.display_name}' on {ticker} saved."]
+
+        if val == "add":
+            picks = _browse_and_select_concepts(ticker, metric)  # type: ignore
+            if not picks:
+                continue
+            base = max((p for _, p in existing), default=-1) + 1
+            for offset, qname in enumerate(picks):
+                query.add_metric_mapping(cik, metric.key, qname, base + offset)
+            print(f"  Mapped {len(picks)} concept(s) onto '{metric.key}'.")
+        elif val.startswith("rm"):
+            arg = val[2:].strip()
+            if arg.isdigit() and 1 <= int(arg) <= len(existing):
+                qname = existing[int(arg) - 1][0]
+                query.remove_metric_mapping(cik, metric.key, qname)
+                print(f"  Removed {qname}.")
+            else:
+                print("  Usage: rm <number>")
+        else:
+            print("  Unknown. Use 'add', 'rm <n>', or Enter to go back.")
+
+def _cmd_map() -> list[str]:
+    """entry point for the per-company concept-to-metric mapping workflow."""
+    if not _active_ticker:
+        return ["No ticker selected. Run 'ticker' first."]
+
+    metric = _select_metric_for_mapping()
+    if metric is None:
+        return ["Mapping cancelled."]
+    return _map_metric(metric)
 
 def _cmd_help() -> list[str]:
     lines = [
         "COMMANDS",
         "  ticker  - Select or add a ticker",
         "  mode    - Toggle annual/quarterly/all",
+        "  map     - Map this company's reported concepts onto metrics",
+        "  metrics - List the metric catalog (✓ = mapped for this ticker)",
         "  help    - Show this help",
         "  quit    - Exit",
         "",
     ]
     if _active_ticker:
-        lines += [
-            "QUERIES",
-            "  revenue, gross, operating, net, eps,",
-            "  assets, liabilities, cash, debt, shares,",
-            "  gross_margin, op_margin, profit_margin,",
-            "  cash_ratio, debt_ratio, debt_equity, current_ratio,",
-            "  net_debt, working_cap, roa, roe",
-        ]
+        mapped = {row[0] for row in query.get_mappings_for_ticker(_active_ticker)}
+        ready = [m.key for m in _get_catalog() if m.key in mapped]
+        lines += ["QUERIES (type a metric key)"]
+        if ready:
+            lines += ["  Mapped: " + ", ".join(ready)]
+        else:
+            lines += ["  Nothing mapped yet for this ticker — run 'map' first."]
+        lines += ["  See all metric keys with 'metrics'."]
     else:
-        lines += ["Run 'ticker' first to enable queries."]
-    
+        lines += ["Run 'ticker' first to enable queries and mapping."]
+
     lines += ["", "KEYS: Ctrl+C exit | Ctrl+Z cancel"]
     return lines
 
-def _cmd_revenue():
-    return _cmd_query(query="revenue", display_name="Revenue")
-
-def _cmd_eps():
-    return _cmd_query(query="eps", display_name="Diluted EPS", is_per_share=True)
-
-def _cmd_gross():
-    return _cmd_query(query="gross", display_name="Gross Profit")
-
-def _cmd_operating():
-    return _cmd_query(query="operating", display_name="Operating Income")
-
-def _cmd_net():
-    return _cmd_query(query="net", display_name="Net Income")
-
-def _cmd_liabilities():
-    return _cmd_query(query="liabilities", display_name="Total Liabilities")
-
-def _cmd_assets():
-    return _cmd_query(query="total_assets", display_name="Total Assets")
-
-def _cmd_cash():
-    return _cmd_query(query="cash_on_hand", display_name="Cash on Hand")
-
-def _cmd_debt():
-    return _cmd_query(query="long_term_total_debt", display_name="Long-Term Debt")
-
-def _cmd_shares():
-    return _cmd_query(query="shares_outstanding", display_name="Shares Outstanding", is_count=True)
-
 BASE_COMMAND_MAP = {
-    "ticker": _cmd_ticker,
-    "mode":   _cmd_mode,
-    "help":   _cmd_help,
-}
-
-QUERY_COMMAND_MAP = {
-    "revenue":     _cmd_revenue,
-    "eps":         _cmd_eps,
-    "gross":       _cmd_gross,
-    "operating":   _cmd_operating,
-    "net":         _cmd_net,
-    "liabilities": _cmd_liabilities,
-    "assets":      _cmd_assets,
-    "cash":        _cmd_cash,
-    "debt":        _cmd_debt,
-    "shares":      _cmd_shares,
-}
-
-METRIC_COMMAND_KEYS = {
-    "gross_margin": "gross_margin",
-    "op_margin": "operating_margin",
-    "profit_margin": "profit_margin",
-    "cash_ratio": "cash_to_assets",
-    "debt_ratio": "debt_to_assets",
-    "debt_equity": "debt_to_equity",
-    "current_ratio": "current_ratio",
-    "net_debt": "net_debt",
-    "working_cap": "working_capital",
-    "roa": "roa",
-    "roe": "roe",
+    "ticker":  _cmd_ticker,
+    "mode":    _cmd_mode,
+    "map":     _cmd_map,
+    "metrics": _cmd_metrics,
+    "help":    _cmd_help,
 }
 
 def _process_command(cmd: str) -> list[str]:
@@ -442,32 +578,25 @@ def _process_command(cmd: str) -> list[str]:
     if cmd in BASE_COMMAND_MAP:
         return BASE_COMMAND_MAP[cmd]()
 
-    if cmd in QUERY_COMMAND_MAP:
+    catalog = _catalog_map()
+    if cmd in catalog:
         if not _active_ticker:
             return ["No ticker selected. Run 'ticker' first."]
-        return QUERY_COMMAND_MAP[cmd]()
-
-    if cmd in METRIC_COMMAND_KEYS:
-        if not _active_ticker:
-            return ["No ticker selected. Run 'ticker' first."]
-        return _cmd_metric(METRIC_COMMAND_KEYS[cmd])
+        return _cmd_query(catalog[cmd])
 
     # prefix matching
-    all_commands = set(BASE_COMMAND_MAP)
+    candidates = set(BASE_COMMAND_MAP)
     if _active_ticker:
-        all_commands.update(QUERY_COMMAND_MAP)
-        all_commands.update(METRIC_COMMAND_KEYS)
-    
-    matches = [c for c in all_commands if c.startswith(cmd)]
-    
+        candidates |= set(catalog)
+
+    matches = sorted(c for c in candidates if c.startswith(cmd))
     if len(matches) == 1:
         return _process_command(matches[0])
     if len(matches) > 1:
         return [f"Ambiguous: {', '.join(matches)}"]
 
-    # check if query command doesn't have ticker
-    ticker_cmds = set(QUERY_COMMAND_MAP) | set(METRIC_COMMAND_KEYS)
-    if any(c.startswith(cmd) for c in ticker_cmds) and not _active_ticker:
+    # a query metric was typed without an active ticker
+    if any(k.startswith(cmd) for k in catalog) and not _active_ticker:
         return ["No ticker selected. Run 'ticker' first."]
 
     return [f"Unknown: '{cmd}'. Type 'help'."]
@@ -501,7 +630,7 @@ def _main():
             try:
                 available_cmds = _get_available_commands()
                 completer = WordCompleter(available_cmds, ignore_case=True, sentence=True)
-                
+
                 raw = cmd_session.prompt("\n> ", completer=completer).strip()
                 result = _process_command(raw)
                 if result:
@@ -511,6 +640,13 @@ def _main():
             except AbortInput:
                 _reset_ui()
                 _add_ui("Cancelled.")
+                _render()
+            except (EOFError, KeyboardInterrupt):
+                raise
+            except Exception as exc:
+                logger.exception("Command failed")
+                _reset_ui()
+                _add_ui(f"Error: {exc}")
                 _render()
 
     except (EOFError, KeyboardInterrupt):
