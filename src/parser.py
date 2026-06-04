@@ -94,7 +94,7 @@ class SECFilingParser:
     def close(self) -> None:
         self._client.close()
     
-    # needed for the with SECFilingParser() as parser
+    # needed for the 'with SECFilingParser() as parser'
     def __enter__(self) -> "SECFilingParser":
         self._session = Session().__enter__()
         return self

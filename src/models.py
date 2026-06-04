@@ -1,5 +1,5 @@
 """
-Shared data contracts used across the project.
+shared data contracts used across the project.
 """
 from __future__ import annotations
 
