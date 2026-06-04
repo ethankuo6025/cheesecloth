@@ -25,8 +25,9 @@ def parse_and_store(
     max_filings: int | None = None,
     batch_size: int = 500,
 ) -> tuple[int, int]:
-    """Parse all un-stored filings of the requested type(s) for `ticker` and
-    persist their facts. Reuses `parser.conn` for storage so all writes
+    """
+    parse all un-stored filings of the requested type(s) for `ticker` and
+    persist their facts. reuses `parser.conn` for storage so all writes
     participate in one transactional context.
     """
     cik, filings_to_parse = parser.get_filings_to_parse(

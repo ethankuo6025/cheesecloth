@@ -32,10 +32,11 @@ def compute_fact_hash(f: ParsedFact) -> str:
 
 
 def _build_fact_params(facts: list[ParsedFact]) -> tuple[list[tuple], int]:
-    """Serialise facts into executemany param tuples.
+    """
+    serialise facts into executemany param tuples.
 
-    Returns (params, failed) where `failed` is the count of facts that could
-    not be serialised. Each failure is logged.
+    returns (params, failed) where `failed` is the count of facts that could
+    not be serialised. each failure is logged.
     """
     params: list[tuple] = []
     failed = 0
@@ -118,9 +119,10 @@ def store_facts(
     facts: list[ParsedFact],
     batch_size: int = 500,
 ) -> tuple[int, int]:
-    """Upsert facts and their parent filings using the caller's connection.
+    """
+    upsert facts and their parent filings using the caller's connection.
 
-    Returns `(upserted, failed)`. Per-fact serialisation failures and per-batch
+    returns `(upserted, failed)`. per-fact serialisation failures and per-batch
     DB errors are logged; the function does not raise.
     """
     if not facts:

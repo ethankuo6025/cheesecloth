@@ -87,7 +87,7 @@ class SECFilingParser:
 
     @property
     def conn(self) -> Connection:
-        """The DB connection the parser was created with — exposed for callers
+        """the DB connection the parser was created with — exposed for callers
         that need to perform additional work in the same transaction."""
         return self._conn
 
