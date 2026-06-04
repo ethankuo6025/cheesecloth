@@ -1,35 +1,22 @@
+"""CLI entry point for scraping SEC filings into the database."""
 from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 from collections.abc import Sequence
 
 import psycopg
-from dotenv import load_dotenv
 
+import config
 from parser import SECFilingParser, TickerNotFoundError
 from store import store_facts
-from ticket_loader import TickerLoadError, load_tickers_from_file
-
-load_dotenv()
-
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT")
-DB_NAME = os.getenv("DB_NAME")
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-CONNINFO = (
-    f"host={DB_HOST} port={DB_PORT} dbname={DB_NAME} "
-    f"user={DB_USER} password={DB_PASSWORD}"
-)
+from ticker_loader import TickerLoadError, load_tickers_from_file
 
 DEFAULT_FILING_TYPES = ("10-K", "10-Q")
 
 logger = logging.getLogger(__name__)
 
-logging.basicConfig(level=logging.INFO)
 
 def parse_and_store(
     parser: SECFilingParser,
@@ -38,8 +25,9 @@ def parse_and_store(
     max_filings: int | None = None,
     batch_size: int = 500,
 ) -> tuple[int, int]:
-    """
-    parse all un-stored filings of the requested type(s) for `ticker` and persist their facts.
+    """Parse all un-stored filings of the requested type(s) for `ticker` and
+    persist their facts. Reuses `parser.conn` for storage so all writes
+    participate in one transactional context.
     """
     cik, filings_to_parse = parser.get_filings_to_parse(
         ticker,
@@ -61,7 +49,9 @@ def parse_and_store(
 
         try:
             facts = parser.parse_filing(filing, ticker_upper, cik)
-            upserted, failed = store_facts([filing], facts, batch_size=batch_size)
+            upserted, failed = store_facts(
+                parser.conn, [filing], facts, batch_size=batch_size
+            )
             total_upserted += upserted
             total_failed += failed
             logger.info(
@@ -78,6 +68,7 @@ def parse_and_store(
 
     return total_upserted, total_failed
 
+
 def process_ticker(
     conn: psycopg.Connection,
     ticker: str,
@@ -90,8 +81,8 @@ def process_ticker(
     run the full pipeline for one ticker across every requested filing type.
     """
     total_upserted = total_failed = 0
-    for ftype in filing_types:
-        with SECFilingParser(conn, max_retries=max_retries, timeout=timeout) as sec_parser:
+    with SECFilingParser(conn, max_retries=max_retries, timeout=timeout) as sec_parser:
+        for ftype in filing_types:
             up, fail = parse_and_store(
                 sec_parser,
                 ticker=ticker,
@@ -103,6 +94,9 @@ def process_ticker(
     return total_upserted, total_failed
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # Configure logging only when invoked as a script — never at import time.
+    logging.basicConfig(level=logging.INFO)
+
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "tickers",
@@ -165,7 +159,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     total_upserted = 0
     total_failed = 0
-    with psycopg.connect(CONNINFO) as conn:
+    with psycopg.connect(**config.db_kwargs()) as conn:
         for ticker in tickers:
             try:
                 upserted, failed = process_ticker(
