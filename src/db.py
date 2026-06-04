@@ -1,7 +1,3 @@
-"""Database connection helpers and read-side queries.
-
-All env loading lives in `config.py`. This module never reads os.getenv directly.
-"""
 from __future__ import annotations
 
 import logging
@@ -18,7 +14,6 @@ import config
 from models import Fact
 
 logger = logging.getLogger(__name__)
-
 
 @contextmanager
 def get_cursor(write: bool = True, db_name: str | None = None):
@@ -40,7 +35,6 @@ def get_cursor(write: bool = True, db_name: str | None = None):
         if conn:
             conn.close()
 
-
 def get_connection(db_name: str | None = None) -> psycopg.Connection:
     try:
         return psycopg.connect(**config.db_kwargs(db_name))
@@ -51,9 +45,8 @@ def get_connection(db_name: str | None = None) -> psycopg.Connection:
         )
         raise
 
-
 def create_database(db_name: str) -> tuple[int, str]:
-    """create the database if it doesn't exist. Returns (code, message)."""
+    """create the database if it doesn't exist. returns (code, message)."""
     ALREADY_EXISTS = "cheesecloth database already exists."
     SUCCESSFUL = "cheesecloth database has been setup successfully."
     conn = None
@@ -74,7 +67,6 @@ def create_database(db_name: str) -> tuple[int, str]:
     finally:
         if conn:
             conn.close()
-
 
 def init_schema() -> tuple[int, str]:
     """initialize/update the database schema from ddl.sql."""
@@ -99,19 +91,31 @@ def init_schema() -> tuple[int, str]:
     except Error as e:
         return (1, f"Error initializing cheesecloth schema: {e}")
 
-
 def setup_database(db_name: str) -> int:
-    """full database setup: create database and initialize/update schema."""
+    """
+    full database setup: create the database if needed, then initialize/update
+    the schema and seed the metric catalog.
+    """
     code, msg = create_database(db_name)
-    if code == 0:
-        print(msg)
-        code, msg = init_schema()
     print(msg)
+    if code == 1:  # could not create or connect — nothing more to do
+        return code
+
+    code, msg = init_schema()
+    print(msg)
+    if code != 0:
+        return code
+
+    from seed_metrics import seed_metrics
+    try:
+        print(f"Seeded {seed_metrics()} metric(s) into the catalog.")
+    except Error as e:
+        print(f"Error seeding metrics: {e}")
+
     return code
 
-
 def reset_database(db_name: str) -> bool:
-    """drops ALL tables and recreate. WARNING: Deletes all data!"""
+    """drops ALL tables and recreate. warning: deletes all data."""
     try:
         conn = get_connection("postgres")
         conn.autocommit = True
@@ -126,13 +130,11 @@ def reset_database(db_name: str) -> bool:
         logger.error("Error resetting database: %s", e)
         return False
 
-
 def get_available_tickers() -> list[tuple]:
-    """Return [(ticker, updated_at), ...] sorted alphabetically."""
+    """return [(ticker, updated_at), ...] sorted alphabetically."""
     with get_cursor(write=False) as cursor:
         cursor.execute("SELECT ticker, updated_at FROM companies ORDER BY ticker")
         return cursor.fetchall()
-
 
 def query_facts(
     ticker: str,
@@ -212,7 +214,6 @@ def query_facts(
             ),
         )
         return [Fact(*row) for row in cursor.fetchall()]
-
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
