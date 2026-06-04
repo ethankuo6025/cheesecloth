@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-import db
+import query
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ SEED_METRICS: list[tuple[str, str, str]] = [
 def seed_metrics() -> int:
     """upsert every catalog metric. returns the number of metrics."""
     for key, display_name, format_type in SEED_METRICS:
-        db.add_metric(key, display_name, format_type)
+        query.add_metric(key, display_name, format_type)
     logger.info("Seeded %d metric(s) into the catalog.", len(SEED_METRICS))
     return len(SEED_METRICS)
 
