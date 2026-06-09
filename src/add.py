@@ -1,6 +1,4 @@
 """CLI entry point for scraping SEC filings into the database."""
-from __future__ import annotations
-
 import argparse
 import logging
 import sys
@@ -8,7 +6,7 @@ from collections.abc import Sequence
 
 import psycopg
 
-import config
+from db_setup import get_connection
 from parser import SECFilingParser, TickerNotFoundError
 from store import store_facts
 from ticker_loader import TickerLoadError, load_tickers_from_file
@@ -160,7 +158,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     total_upserted = 0
     total_failed = 0
-    with psycopg.connect(**config.db_kwargs()) as conn:
+    with get_connection() as conn:
         for ticker in tickers:
             try:
                 upserted, failed = process_ticker(

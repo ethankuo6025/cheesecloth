@@ -1,3 +1,4 @@
+"""Arelle rate limiter plugin for the SEC API"""
 from typing import Any
 from time import sleep, monotonic
 from urllib.parse import urlparse

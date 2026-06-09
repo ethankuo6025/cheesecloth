@@ -1,20 +1,11 @@
-"""Persist parsed facts to the database.
-
-Accepts an open `psycopg.Connection` from the caller so all work participates
-in one transactional unit (rather than opening a second connection internally).
-"""
-from __future__ import annotations
-
+"""stores parsed facts to the database"""
 import hashlib
 import json
 import logging
-
 from psycopg import Connection
-
 from parser import Filing, ParsedFact
 
 logger = logging.getLogger(__name__)
-
 
 def compute_fact_hash(f: ParsedFact) -> str:
     """unique identity for deduplication"""
@@ -29,7 +20,6 @@ def compute_fact_hash(f: ParsedFact) -> str:
         f"{dims}"
     )
     return hashlib.sha256(data.encode("utf-8")).hexdigest()[:64]
-
 
 def _build_fact_params(facts: list[ParsedFact]) -> tuple[list[tuple], int]:
     """
@@ -69,7 +59,6 @@ def _build_fact_params(facts: list[ParsedFact]) -> tuple[list[tuple], int]:
                 exc_info=True,
             )
     return params, failed
-
 
 _UPSERT_SQL = """
 INSERT INTO facts (
@@ -111,7 +100,6 @@ ON CONFLICT (fact_hash) DO UPDATE SET
     ELSE facts.decimals
   END
 """
-
 
 def store_facts(
     conn: Connection,
@@ -169,5 +157,4 @@ def store_facts(
                         len(params), i,
                         exc_info=True,
                     )
-
     return upserted, failed

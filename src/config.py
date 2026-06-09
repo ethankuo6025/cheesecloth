@@ -1,4 +1,4 @@
-from __future__ import annotations
+"""global config file"""
 import os
 from typing import Any
 from dotenv import load_dotenv
@@ -12,17 +12,15 @@ DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 SEC_USER_AGENT = os.getenv("SEC_USER_AGENT")
 
-
-def db_kwargs(db_name: str | None = None) -> dict[str, Any]:
+def db_kwargs() -> dict[str, Any]:
     """connection kwargs for psycopg.connect(**db_kwargs())."""
     return {
         "host": DB_HOST,
         "port": DB_PORT,
-        "dbname": db_name or DB_NAME,
+        "dbname": DB_NAME,
         "user": DB_USER,
         "password": DB_PASSWORD,
     }
-
 
 # https://www.sec.gov/about/webmaster-frequently-asked-questions#developers
 def sec_headers() -> dict[str, str]:
@@ -33,6 +31,6 @@ def sec_headers() -> dict[str, str]:
         "Accept": "application/json",
     }
 
-
-# ── Arelle ───────────────────────────────────────────────────────────
 ARELLE_PLUGINS_PATH = os.getenv("ARELLE_PLUGINS_PATH", "")
+
+SEC_COMPANY_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"

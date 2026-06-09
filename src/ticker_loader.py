@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+"""loads tickers from a text_file to use with parser"""
 from pathlib import Path
 import logging
 

@@ -1,3 +1,4 @@
+"""CLI/TUI interface for accessing screener"""
 import logging
 import shutil
 from prompt_toolkit.key_binding import KeyBindings
@@ -7,7 +8,7 @@ from prompt_toolkit.shortcuts import clear as clear_screen
 
 from parser import SECFilingParser, TickerNotFoundError
 from add import parse_and_store
-from db import get_available_tickers, get_connection
+from db_setup import get_available_tickers, get_connection
 import query
 from models import Metric
 

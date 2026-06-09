@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+"""seeds the metrics table"""
 import logging
 
 import query

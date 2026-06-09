@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+"""handles core database activities: database creation, setup, and connections management"""
 import logging
 import os
 import sys
@@ -51,7 +50,7 @@ def create_database(db_name: str) -> tuple[int, str]:
     SUCCESSFUL = "cheesecloth database has been setup successfully."
     conn = None
     try:
-        conn = get_connection("postgres")
+        conn = get_connection()
         conn.autocommit = True
         with conn.cursor() as cursor:
             cursor.execute(
@@ -106,7 +105,7 @@ def setup_database(db_name: str) -> int:
     if code != 0:
         return code
 
-    from seed_metrics import seed_metrics
+    from metrics_setup import seed_metrics
     try:
         print(f"Seeded {seed_metrics()} metric(s) into the catalog.")
     except Error as e:
@@ -117,7 +116,7 @@ def setup_database(db_name: str) -> int:
 def reset_database(db_name: str) -> bool:
     """drops ALL tables and recreate. warning: deletes all data."""
     try:
-        conn = get_connection("postgres")
+        conn = get_connection()
         conn.autocommit = True
         with conn.cursor() as cursor:
             cursor.execute(
@@ -135,85 +134,6 @@ def get_available_tickers() -> list[tuple]:
     with get_cursor(write=False) as cursor:
         cursor.execute("SELECT ticker, updated_at FROM companies ORDER BY ticker")
         return cursor.fetchall()
-
-def query_facts(
-    ticker: str,
-    qnames: list[str],
-    query_type: str,
-    fact_kind: str = "numeric",
-) -> list[tuple]:
-    """
-    fetch facts for a ticker, picking the highest-priority qname per filing,
-    filtering by period type and fact kind, deduplicating, and sorting by date.
-    """
-    with get_cursor(write=False) as cursor:
-        cursor.execute(
-            """
-            WITH
-            ranked_facts AS (
-                SELECT
-                    f.local_name,
-                    f.period_type,
-                    f.value,
-                    f.instant_date,
-                    f.start_date,
-                    f.end_date,
-                    f.unit,
-                    f.decimals,
-                    f.accession_number,
-                    array_position(%s::text[], f.qname) AS qname_rank
-                FROM facts f
-                JOIN companies c ON c.cik = f.cik
-                WHERE c.ticker = %s
-                  AND f.qname = ANY(%s::text[])
-                  AND f.dimensions = '{}'::jsonb
-                  AND (
-                      %s = 'all'
-                      OR (%s = 'numeric' AND f.unit IS NOT NULL)
-                      OR (%s = 'textual'  AND f.unit IS NULL)
-                  )
-            ),
-            best_qname_per_filing AS (
-                SELECT accession_number, MIN(qname_rank) AS best_rank
-                FROM ranked_facts
-                GROUP BY accession_number
-            ),
-            filtered_facts AS (
-                SELECT rf.local_name, rf.period_type, rf.value,
-                       rf.instant_date, rf.start_date, rf.end_date,
-                       rf.unit, rf.decimals, rf.accession_number
-                FROM ranked_facts rf
-                JOIN best_qname_per_filing bq
-                    ON rf.accession_number = bq.accession_number
-                   AND rf.qname_rank = bq.best_rank
-                WHERE
-                    rf.instant_date IS NOT NULL
-                    OR (rf.start_date IS NOT NULL AND rf.end_date IS NOT NULL AND (
-                        %s = 'all'
-                        OR (%s = 'annual'    AND (rf.end_date - rf.start_date) > 350)
-                        OR (%s = 'quarterly' AND (rf.end_date - rf.start_date) < 100)
-                    ))
-                    OR (rf.instant_date IS NULL AND rf.start_date IS NULL AND rf.end_date IS NULL)
-            ),
-            deduped AS (
-                SELECT DISTINCT ON (instant_date, start_date, end_date)
-                    local_name, period_type, value,
-                    instant_date, start_date, end_date,
-                    unit, decimals, accession_number
-                FROM filtered_facts
-                ORDER BY instant_date, start_date, end_date, accession_number
-            )
-            SELECT *
-            FROM deduped
-            ORDER BY COALESCE(end_date, instant_date, start_date) DESC NULLS LAST
-            """,
-            (
-                qnames, ticker.upper(), qnames,
-                fact_kind, fact_kind, fact_kind,
-                query_type, query_type, query_type,
-            ),
-        )
-        return [Fact(*row) for row in cursor.fetchall()]
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

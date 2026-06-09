@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+"""parses filings for a given ticker"""
 import logging
 from dataclasses import dataclass, field
 from datetime import date
@@ -112,12 +111,12 @@ class SECFilingParser:
         except httpx.HTTPError as e:
             raise FilingFetchError(f"Request failed for {url}: {e}") from e
 
-    def _get_ticker_to_cik(self) -> dict[str, str]:
+    def _get_ticker_to_cik( self) -> dict[str, str]:
         """fetch and cache ticker-to-cik mapping."""
         if self._ticker_to_cik is not None:
             return self._ticker_to_cik
 
-        data = self._get_json("https://www.sec.gov/files/company_tickers.json")
+        data = self._get_json(config.SEC_COMPANY_TICKERS_URL)
         if not isinstance(data, dict):
             raise SECFilingParserError("Unexpected ticker-to-cik payload.")
 
