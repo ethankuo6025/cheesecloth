@@ -421,63 +421,33 @@ def _select_metric_for_mapping() -> Metric | None:
     return None
 
 def _browse_and_select_concepts(ticker: str, metric: Metric) -> list[str]:
-    """browse the company's reported concepts and return chosen qnames in order."""
-    search: str | None = None
-    LIMIT = 40
+    """prompt for concepts to map, with qname autocomplete."""
+    concepts = query.get_company_concepts(ticker)
+    if not concepts:
+        print("  This company has no reported concepts. Scrape it first.")
+        return []
 
-    while True:
-        concepts = query.get_company_concepts(ticker, search)
-        if not concepts:
-            if search:
-                print(f"  No concepts match '{search}'.")
-                search = None
-                continue
-            print("  This company has no reported concepts. Scrape it first.")
+    all_qnames = [q for q, *_ in concepts]
+    completer = WordCompleter(all_qnames, ignore_case=True, sentence=True)
+
+    print(f"\n  Type to search concepts for {ticker} — pick which feed '{metric.display_name}'.")
+    print("  Separate multiple with commas. Enter to cancel.")
+
+    val = form_session.prompt("  concept> ", completer=completer).strip()  # type: ignore
+    if not val:
+        return []
+
+    picks: list[str] = []
+    for token in (t.strip() for t in val.split(",") if t.strip()):
+        match = next((q for q in all_qnames if q.lower() == token.lower()), None)
+        if match:
+            picks.append(match)
+        else:
+            print(f"  Unknown concept: '{token}'.")
             return []
 
-        shown = concepts[:LIMIT]
-        filt = f" (filter: '{search}')" if search else ""
-        print(f"\n  Concepts for {ticker}{filt} — pick which feed '{metric.display_name}':")
-        for i, (qname, local_name, count, latest) in enumerate(shown, 1):
-            print(
-                f"    {i:>3}. {local_name[:34]:<34} {qname[:42]:<42} "
-                f"{count:>4} facts  latest={_short_value(latest)}"
-            )
-        if len(concepts) > len(shown):
-            print(f"    ... {len(concepts) - len(shown)} more — use '/text' to filter.")
-
-        print("\n  Enter numbers to map (e.g. '1' or '1,3,5'; order sets priority),")
-        print("  '/text' to filter, or Enter to cancel.")
-
-        completer = WordCompleter(
-            [q for q, *_ in concepts], ignore_case=True, sentence=True
-        )
-        val = form_session.prompt("  concept> ", completer=completer).strip()  # type: ignore
-        if not val:
-            return []
-        if val.startswith("/"):
-            search = val[1:].strip() or None
-            continue
-
-        picks: list[str] = []
-        ok = True
-        for token in val.replace(" ", "").split(","):
-            if not token:
-                continue
-            if token.isdigit() and 1 <= int(token) <= len(shown):
-                picks.append(shown[int(token) - 1][0])
-            else:
-                match = next((q for q, *_ in concepts if q.lower() == token.lower()), None)
-                if match:
-                    picks.append(match)
-                else:
-                    print(f"  Invalid selection: '{token}'.")
-                    ok = False
-                    break
-        if ok and picks:
-            # de-duplicate while preserving order
-            seen: set[str] = set()
-            return [q for q in picks if not (q in seen or seen.add(q))]
+    seen: set[str] = set()
+    return [q for q in picks if not (q in seen or seen.add(q))]
 
 def _map_metric(metric: Metric) -> list[str]:
     """view/add/remove mappings for one metric on the active ticker."""
