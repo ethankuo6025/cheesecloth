@@ -8,18 +8,16 @@ from typing import cast
 import psycopg
 from psycopg import Error, sql
 from psycopg.abc import Query
-
 import config
-from models import Fact
 
 logger = logging.getLogger(__name__)
 
 @contextmanager
-def get_cursor(write: bool = True, db_name: str | None = None):
+def get_cursor(write: bool = True):
     conn = None
     cursor = None
     try:
-        conn = get_connection(db_name)
+        conn = get_connection()
         cursor = conn.cursor()
         yield cursor
         if write:
@@ -34,17 +32,17 @@ def get_cursor(write: bool = True, db_name: str | None = None):
         if conn:
             conn.close()
 
-def get_connection(db_name: str | None = None) -> psycopg.Connection:
+def get_connection() -> psycopg.Connection:
     try:
-        return psycopg.connect(**config.db_kwargs(db_name))
+        return psycopg.connect(**config.db_kwargs())
     except Error as e:
         logger.error(
             "Connection error (db=%s, host=%s, port=%s, user=%s): %s",
-            db_name or config.DB_NAME, config.DB_HOST, config.DB_PORT, config.DB_USER, e,
+            config.DB_NAME, config.DB_HOST, config.DB_PORT, config.DB_USER, e,
         )
         raise
 
-def create_database(db_name: str) -> tuple[int, str]:
+def create_database() -> tuple[int, str]:
     """create the database if it doesn't exist. returns (code, message)."""
     ALREADY_EXISTS = "cheesecloth database already exists."
     SUCCESSFUL = "cheesecloth database has been setup successfully."
@@ -55,11 +53,11 @@ def create_database(db_name: str) -> tuple[int, str]:
         with conn.cursor() as cursor:
             cursor.execute(
                 "SELECT 1 FROM pg_database WHERE datname = %s",
-                (db_name,),
+                (config.DB_NAME,),
             )
             if cursor.fetchone():
                 return (-1, ALREADY_EXISTS)
-            cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name)))
+            cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(config.DB_NAME)))
         return (0, SUCCESSFUL)
     except Error as e:
         return (1, f"Error creating database: {e}")
@@ -90,12 +88,12 @@ def init_schema() -> tuple[int, str]:
     except Error as e:
         return (1, f"Error initializing cheesecloth schema: {e}")
 
-def setup_database(db_name: str) -> int:
+def setup_database() -> int:
     """
     full database setup: create the database if needed, then initialize/update
     the schema and seed the metric catalog.
     """
-    code, msg = create_database(db_name)
+    code, msg = create_database()
     print(msg)
     if code == 1:  # could not create or connect — nothing more to do
         return code
@@ -113,18 +111,18 @@ def setup_database(db_name: str) -> int:
 
     return code
 
-def reset_database(db_name: str) -> bool:
+def reset_database() -> bool:
     """drops ALL tables and recreate. warning: deletes all data."""
     try:
         conn = get_connection()
         conn.autocommit = True
         with conn.cursor() as cursor:
             cursor.execute(
-                sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(db_name))
+                sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(config.DB_NAME))
             )
         conn.close()
         print("All tables dropped.")
-        return setup_database(db_name) == 0
+        return setup_database() == 0
     except Error as e:
         logger.error("Error resetting database: %s", e)
         return False
@@ -138,11 +136,11 @@ def get_available_tickers() -> list[tuple]:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     if len(sys.argv) > 1 and sys.argv[1] == "--reset":
-        confirm = input("This will DELETE ALL DATA. Type 'yes I understand' to confirm: ")
+        confirm = input("This will DELETE ALL DATA from cheesecloth. Type 'yes I understand' to confirm: ")
         if confirm == "yes I understand":
-            if create_database(config.DB_NAME):
-                reset_database(config.DB_NAME)
+            if create_database():
+                reset_database()
         else:
             print("Incorrect response: operation cancelled.")
     else:
-        setup_database(config.DB_NAME)
+        setup_database()
