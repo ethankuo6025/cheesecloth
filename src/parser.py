@@ -1,15 +1,13 @@
 """parses filings for a given ticker"""
 import logging
-from dataclasses import dataclass, field
 from datetime import date
-from enum import Enum
 from typing import Any, cast
 
 import httpx
 from arelle.api.Session import Session
 from arelle.RuntimeOptions import RuntimeOptions
 from psycopg import Connection
-
+from models import ParsedFact, Filing, PeriodType
 import config
 import rate_limiter
 
@@ -17,34 +15,6 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
-
-class PeriodType(Enum):
-    INSTANT = "instant"
-    DURATION = "duration"
-
-@dataclass
-class ParsedFact:
-    ticker: str
-    cik: str
-    accession_number: str
-    qname: str
-    namespace: str
-    local_name: str
-    period_type: PeriodType
-    value: str | None = None
-    instant_date: date | None = None
-    start_date: date | None = None
-    end_date: date | None = None
-    unit: str | None = None
-    decimals: int | None = None
-    dimensions: dict[str, str] = field(default_factory=dict)
-
-@dataclass
-class Filing:
-    cik: str
-    accession_number: str
-    entry_file: str
-    filing_type: str
 
 class SECFilingParserError(Exception):
     pass
