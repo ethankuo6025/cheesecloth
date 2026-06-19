@@ -10,9 +10,7 @@ from db_setup import get_connection
 from parser import SECFilingParser, TickerNotFoundError
 from store import store_facts
 from ticker_loader import TickerLoadError, load_tickers_from_file
-
-DEFAULT_FILING_TYPES = ("10-K", "10-Q")
-
+from config import DEFAULT_FILING_TYPES
 logger = logging.getLogger(__name__)
 
 
@@ -93,7 +91,6 @@ def process_ticker(
     return total_upserted, total_failed
 
 def main(argv: Sequence[str] | None = None) -> int:
-    # Configure logging only when invoked as a script — never at import time.
     logging.basicConfig(level=logging.INFO)
 
     ap = argparse.ArgumentParser()
@@ -114,27 +111,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--filing-types",
         nargs="+",
         default=list(DEFAULT_FILING_TYPES),
-        help=f"Filing form types to fetch. Default: {list(DEFAULT_FILING_TYPES)}",
+        help=f"Filing form types to fetch. Default = {list(DEFAULT_FILING_TYPES)}",
     )
     ap.add_argument(
         "--max-filings",
         type=int,
         default=None,
-        help="Cap on filings per ticker+type. Default: no cap.",
+        help="Cap on filings per ticker+type. Default = none",
     )
     ap.add_argument(
         "--max-retries",
         type=int,
         default=3,
-        help="HTTP transport retry count. Default: 3.",
+        help="HTTP transport retry count. Default = 3",
     )
     ap.add_argument(
         "--timeout",
         type=float,
         default=30.0,
-        help="HTTP timeout in seconds. Default: 30.",
+        help="HTTP timeout in seconds. Default = 30s",
     )
     args = ap.parse_args(argv)
+
     # resolve ticker set from all sources.
     try:
         # combine inline tickers with tickers loaded from zero or more files

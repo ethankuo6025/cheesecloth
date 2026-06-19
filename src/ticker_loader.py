@@ -16,7 +16,7 @@ def load_tickers_from_file(path: str) -> list[str]:
     except OSError as e:
         raise TickerLoadError(f"Could not read ticker file '{p}': {e}") from e
 
-    tickers: list[str] = []
+    tickers: list[str] = [] 
     for _, line in enumerate(raw.splitlines()):
         if "#" in line:
             line = line.split("#", 1)[0]
