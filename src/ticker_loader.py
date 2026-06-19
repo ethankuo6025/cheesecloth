@@ -24,5 +24,5 @@ def load_tickers_from_file(path: str) -> list[str]:
         if line:
             tickers.append(line.upper())
 
-    logger.info("Loaded %d ticker(s) from %s", len(tickers), p)
+    logger.info(f"Loaded {len(tickers)} ticker(s) from {p}")
     return tickers

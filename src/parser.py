@@ -78,8 +78,6 @@ class SECFilingParser:
             entrypointFile=None,
             internetConnectivity="online",
             keepOpen=True,
-            logFile="logToStructuredMessage",
-            logFormat="[%(messageCode)s] %(message)s - %(file)s",
             logLevel="WARNING",
             plugins=f"{config.ARELLE_PLUGINS_PATH}|rate_limiter.py",
         )

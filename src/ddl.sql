@@ -35,18 +35,18 @@ CREATE TABLE IF NOT EXISTS facts (
 );
 
 CREATE TABLE IF NOT EXISTS metrics (
-    key          VARCHAR(64) PRIMARY KEY,
+    key VARCHAR(64) PRIMARY KEY,
     display_name VARCHAR(128) NOT NULL UNIQUE,
-    format_type  VARCHAR(16) NOT NULL DEFAULT 'text'
+    format_type VARCHAR(16) NOT NULL DEFAULT 'text'
       CHECK (format_type IN ('percentage','ratio','currency',
                              'number','text'))
 );
 
 CREATE TABLE IF NOT EXISTS metric_mappings (
-    cik        VARCHAR(10) NOT NULL REFERENCES companies(cik) ON DELETE CASCADE,
+    cik VARCHAR(10) NOT NULL REFERENCES companies(cik) ON DELETE CASCADE,
     metric_key VARCHAR(64) NOT NULL REFERENCES metrics(key)   ON DELETE CASCADE,
-    qname      VARCHAR(300) NOT NULL,
-    priority   INTEGER NOT NULL DEFAULT 0,   -- lower = tried first
+    qname VARCHAR(300) NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,   -- lower = tried first
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT metric_mapping_key PRIMARY KEY (cik, metric_key, qname)
 );
