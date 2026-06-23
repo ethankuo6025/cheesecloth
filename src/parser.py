@@ -7,7 +7,14 @@ import httpx
 from arelle.api.Session import Session
 from arelle.RuntimeOptions import RuntimeOptions
 from psycopg import Connection
-from models import ParsedFact, Filing, PeriodType
+from models import (
+    ParsedFact,
+    Filing,
+    PeriodType,
+    SECFilingParserError,
+    TickerNotFoundError,
+    FilingFetchError,
+)
 import config
 import rate_limiter
 
@@ -15,17 +22,6 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
-
-class SECFilingParserError(Exception):
-    pass
-
-class TickerNotFoundError(SECFilingParserError):
-    """thrown by _get_cik() on invalid tickers."""
-    pass
-
-class FilingFetchError(SECFilingParserError):
-    """thrown by _get_json() on http issues."""
-    pass
 
 class SECFilingParser:
     """parses xbrl facts from sec edgar filings (defaults to 10-ks)."""
@@ -357,4 +353,3 @@ class SECFilingParser:
             raise
         except Exception as e:
             raise SECFilingParserError(f"Error parsing {url}: {e}") from e
-

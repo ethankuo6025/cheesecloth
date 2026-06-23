@@ -6,6 +6,17 @@ from typing import NamedTuple
 from dataclasses import dataclass, field
 from enum import Enum
 
+class SECFilingParserError(Exception):
+    pass
+
+class TickerNotFoundError(SECFilingParserError):
+    """thrown by SECFilingParser._get_cik() on invalid tickers."""
+    pass
+
+class FilingFetchError(SECFilingParserError):
+    """thrown by SECFilingParser._get_json() on http issues."""
+    pass
+
 class PeriodType(Enum):
     INSTANT = "instant"
     DURATION = "duration"
