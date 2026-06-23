@@ -4,10 +4,9 @@ import logging
 import sys
 from collections.abc import Sequence
 
-import psycopg
-
 from db_setup import get_connection
-from parser import SECFilingParser, TickerNotFoundError
+from parser import SECFilingParser
+from models import SECFilingParserError
 from store import store_facts
 from ticker_loader import TickerLoadError, load_tickers_from_file
 from config import DEFAULT_FILING_TYPES
@@ -65,30 +64,29 @@ def parse_and_store(
 
     return total_upserted, total_failed
 
-
-def process_ticker(
-    conn: psycopg.Connection,
+def scrape_ticker(
+    parser: SECFilingParser,
     ticker: str,
     filing_types: Sequence[str],
-    max_filings: int | None,
-    max_retries: int,
-    timeout: float,
+    max_filings: int | None = None,
 ) -> tuple[int, int]:
     """
     run the full pipeline for one ticker across every requested filing type.
     """
     total_upserted = total_failed = 0
-    with SECFilingParser(conn, max_retries=max_retries, timeout=timeout) as sec_parser:
-        for ftype in filing_types:
-            up, fail = parse_and_store(
-                sec_parser,
-                ticker=ticker,
-                filing_types=ftype,
-                max_filings=max_filings,
-            )
-            total_upserted += up
-            total_failed += fail
+    for ftype in filing_types:
+        up, fail = parse_and_store(
+            parser,
+            ticker=ticker,
+            filing_types=ftype,
+            max_filings=max_filings,
+        )
+        total_upserted += up
+        total_failed += fail
     return total_upserted, total_failed
+
+def open_parser(conn, max_retries=3, timeout=30.0) -> SECFilingParser:
+    return SECFilingParser(conn, max_retries=max_retries, timeout=timeout)
 
 def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO)
@@ -157,25 +155,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     total_upserted = 0
     total_failed = 0
     with get_connection() as conn:
-        for ticker in tickers:
-            try:
-                upserted, failed = process_ticker(
-                    conn,
-                    ticker=ticker,
-                    filing_types=args.filing_types,
-                    max_filings=args.max_filings,
-                    max_retries=args.max_retries,
-                    timeout=args.timeout,
-                )
-                total_upserted += upserted
-                total_failed += failed
-                print(f"[{ticker}] upserted={upserted} failed={failed}")
-            except TickerNotFoundError:
-                print(f"[{ticker}] not found in SEC EDGAR — skipping.")
-
+        with open_parser(conn) as parser:
+            for ticker in tickers:
+                try:
+                    upserted, failed = scrape_ticker(parser, ticker, ("10-K", "10-Q"))
+                    total_upserted += upserted
+                    total_failed += failed
+                    print(f"[{ticker}] upserted={upserted} failed={failed}")
+                except SECFilingParserError:
+                    print(f"[{ticker}] not found in SEC EDGAR — skipping.")
     print(f"\nDone. Total upserted: {total_upserted}, total failed: {total_failed}")
-    return 0 if total_failed == 0 else 1
-
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -3,7 +3,7 @@ import hashlib
 import json
 import logging
 from psycopg import Connection
-from parser import Filing, ParsedFact
+from models import Filing, ParsedFact
 
 logger = logging.getLogger(__name__)
 

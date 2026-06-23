@@ -6,8 +6,8 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.shortcuts import clear as clear_screen
 
-from parser import SECFilingParser, TickerNotFoundError
-from add import parse_and_store
+from add import scrape_ticker, open_parser
+from models import TickerNotFoundError
 from db_setup import get_available_tickers, get_connection
 import query
 from models import Metric
@@ -22,12 +22,11 @@ ui_state = []
 cmd_session = None
 form_session = None
 
-parser_ctx = None  # global parser kept open for the session
+parser = None  # global parser kept open for the session
 
 _active_ticker: str | None = None
 _query_mode: str = "annual"  # "annual", "quarterly", or "all"
 
-# Catalog of metrics, loaded once per session and refreshed when it changes.
 _catalog: list[Metric] | None = None
 
 class AbortInput(Exception):
@@ -123,15 +122,6 @@ def _prompt_int(prompt_text: str, default=None, min_val=None, max_val=None):
         except ValueError:
             print("  Enter a number.")
 
-def _run_scrape(ticker: str) -> tuple[int, int]:
-    total_upserted = 0
-    total_failed = 0
-    for filing_type in ("10-K", "10-Q"):
-        upserted, failed = parse_and_store(parser_ctx, ticker=ticker, filing_types=filing_type)  # type:ignore
-        total_upserted += upserted
-        total_failed += failed
-    return total_upserted, total_failed
-
 def _prompt_and_scrape_ticker() -> str | None:
     """processes new ticker for database."""
     ticker = _prompt_str("Enter ticker to scrape (e.g. AAPL)", required=True)
@@ -140,7 +130,7 @@ def _prompt_and_scrape_ticker() -> str | None:
     print(f"\n  Scraping SEC filings for {ticker} - this may take a moment...")
 
     try:
-        upserted, failed = _run_scrape(ticker)
+        upserted, failed = scrape_ticker(parser, ticker, ("10-K", "10-Q"))  # type:ignore
     except TickerNotFoundError:
         print(f"  '{ticker}' was not found in SEC EDGAR. Check the ticker symbol.")
         return None
@@ -573,7 +563,7 @@ def _process_command(cmd: str) -> list[str]:
     return [f"Unknown: '{cmd}'. Type 'help'."]
 
 def _main():
-    global cmd_session, form_session, parser_ctx
+    global cmd_session, form_session, parser
 
     cmd_session = PromptSession(key_bindings=kb)
     form_session = PromptSession(key_bindings=kb)
@@ -583,7 +573,7 @@ def _main():
     print(_header_line())
 
     conn = get_connection()
-    parser_ctx = SECFilingParser(conn, max_retries=3, timeout=30.0).__enter__()
+    parser = open_parser(conn=conn)
 
     try:
         _reset_ui()
@@ -624,7 +614,7 @@ def _main():
         print("\n\nGoodbye!")
     finally:
         try:
-            parser_ctx.__exit__(None, None, None)
+            parser.__exit__(None, None, None)
         except Exception:
             pass
         try:
