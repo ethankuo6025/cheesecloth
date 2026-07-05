@@ -28,10 +28,14 @@ def db_kwargs() -> dict[str, Any]:
 
 # https://www.sec.gov/about/webmaster-frequently-asked-questions#developers
 SEC_USER_AGENT = os.getenv("SEC_USER_AGENT")
-def sec_headers() -> dict[str, str]:
+def sec_headers() -> dict[str]:
     """HTTP headers for requests to SEC EDGAR."""
     return {
         "User-Agent": SEC_USER_AGENT,
         "Accept-Encoding": "gzip",
         "Accept": "application/json",
     }
+
+def nonsec_headers() ->  dict[str]:
+    return {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
