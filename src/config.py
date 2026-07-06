@@ -10,6 +10,7 @@ DEFAULT_FILING_TYPES = ("10-K", "10-Q")
 ARELLE_PLUGINS_PATH = os.getenv("ARELLE_PLUGINS_PATH", "")
 
 SEC_COMPANY_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+SEC_COMPANY_FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
 
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT")
