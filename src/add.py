@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from db_setup import get_connection
 from parser import SECFilingParser
 from models import SECFilingParserError
-from store import store_facts
+from store import store_textual_facts
 from ticker_loader import TickerLoadError, load_tickers_from_file
 from config import DEFAULT_FILING_TYPES
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ def parse_and_store(
 
         try:
             facts = parser.parse_filing(filing, ticker_upper, cik)
-            upserted, failed = store_facts(
+            upserted, failed = store_textual_facts(
                 parser.conn, [filing], facts, batch_size=batch_size
             )
             total_upserted += upserted

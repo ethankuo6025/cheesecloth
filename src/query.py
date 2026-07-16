@@ -3,30 +3,36 @@ from __future__ import annotations
 from db_setup import get_cursor
 from models import Fact, Metric
 
-_FETCH_SQL = """
+def _ranked_fact_sql(table: str, qname_expr: str, name_col: str, extra_where: str = "") -> str:
+    """
+    shared shape for both numerical and textual: rank qnames by
+    caller-supplied priority, keep the highest-priority qname per filing,
+    filter by period type, dedupe, and sort by date. `table` selects which
+    table to read from; `qname_expr` is how to compute a fully-qualified
+    concept name for that table (numerical has no stored qname -- it's
+    always just `taxonomy || ':' || fname`); `name_col` is the bare display
+    name column; `extra_where` adds any table-specific predicate (e.g.
+    numerical has no `dimensions` column to filter on).
+    """
+    unit_col = "f.unit" if table == "numerical" else "NULL::varchar AS unit"
+    return f"""
 WITH
 ranked_facts AS (
     SELECT
-        f.local_name,
+        f.{name_col} AS local_name,
         f.period_type,
         f.value,
         f.instant_date,
         f.start_date,
         f.end_date,
-        f.unit,
-        f.decimals,
+        {unit_col},
         f.accession_number,
-        array_position(%s::text[], f.qname) AS qname_rank
-    FROM facts f
+        array_position(%s::text[], {qname_expr}) AS qname_rank
+    FROM {table} f
     JOIN companies c ON c.cik = f.cik
     WHERE c.ticker = %s
-        AND f.qname = ANY(%s::text[])
-        AND f.dimensions = '{}'::jsonb
-        AND (
-            %s = 'all'
-            OR (%s = 'numeric' AND f.unit IS NOT NULL)
-            OR (%s = 'textual'  AND f.unit IS NULL)
-        )
+        AND {qname_expr} = ANY(%s::text[])
+        {extra_where}
 ),
 best_qname_per_filing AS (
     SELECT accession_number, MIN(qname_rank) AS best_rank
@@ -36,7 +42,7 @@ best_qname_per_filing AS (
 filtered_facts AS (
     SELECT rf.local_name, rf.period_type, rf.value,
             rf.instant_date, rf.start_date, rf.end_date,
-            rf.unit, rf.decimals, rf.accession_number
+            rf.unit, rf.accession_number
     FROM ranked_facts rf
     JOIN best_qname_per_filing bq
         ON rf.accession_number = bq.accession_number
@@ -54,7 +60,7 @@ deduped AS (
     SELECT DISTINCT ON (instant_date, start_date, end_date)
         local_name, period_type, value,
         instant_date, start_date, end_date,
-        unit, decimals, accession_number
+        unit, accession_number
     FROM filtered_facts
     ORDER BY instant_date, start_date, end_date, accession_number
 )
@@ -63,21 +69,25 @@ FROM deduped
 ORDER BY COALESCE(end_date, instant_date, start_date) DESC NULLS LAST
 """
 
+_NUMERICAL_FETCH_SQL = _ranked_fact_sql("numerical", "(f.taxonomy || ':' || f.fname)", "fname")
+_TEXTUAL_FETCH_SQL = _ranked_fact_sql("textual", "f.qname", "local_name", "AND f.dimensions = '{}'::jsonb")
+
 def query_facts(
     ticker: str,
     qnames: list[str],
     query_type: str,
-    fact_kind: str = "numeric",
-) -> list[tuple]:
+    fact_kind: str = "numerical",
+) -> list[Fact]:
     """
     fetch facts for a ticker, picking the highest-priority qname per filing,
-    filtering by period type and fact kind, deduplicating, and sorting by date.
+    filtering by period type, deduplicating, and sorting by date. `fact_kind`
+    selects whether to read from numerical or textual.
     """
+    sql = _NUMERICAL_FETCH_SQL if fact_kind == "numerical" else _TEXTUAL_FETCH_SQL
     with get_cursor(write=False) as cursor:
-        cursor.execute(_FETCH_SQL, 
-        (qnames, ticker.upper(), qnames, 
-         fact_kind, fact_kind, fact_kind, 
-         query_type, query_type, query_type),
+        cursor.execute(
+            sql,
+            (qnames, ticker.upper(), qnames, query_type, query_type, query_type),
         )
         return [Fact(*row) for row in cursor.fetchall()]
 
@@ -91,7 +101,7 @@ def resolve(ticker: str, key: str, query_type: str) -> list[Fact]:
     if not qnames:
         return []
 
-    fact_kind = "textual" if metric.format_type == "text" else "numeric"
+    fact_kind = "textual" if metric.format_type == "text" else "numerical"
     return query_facts(ticker, qnames, query_type, fact_kind=fact_kind)
 
 
@@ -155,33 +165,53 @@ def get_metric_mappings(ticker: str, metric_key: str) -> list[str]:
         return [row[0] for row in cursor.fetchall()]
 
 
+def _company_concepts_sql(
+    table: str, qname_expr: str, name_col: str, has_search: bool, extra_where: str = ""
+) -> str:
+    """shared per-table aggregate used by get_company_concepts()'s UNION ALL."""
+    where = "c.ticker = %s"
+    if has_search:
+        where += f" AND ({qname_expr} ILIKE %s OR f.{name_col} ILIKE %s)"
+    where += extra_where
+    return f"""
+        SELECT
+            {qname_expr} AS qname,
+            MIN(f.{name_col}) AS local_name,
+            COUNT(*) AS fact_count,
+            (ARRAY_AGG(f.value ORDER BY
+                COALESCE(f.end_date, f.instant_date, f.start_date) DESC NULLS LAST
+            ))[1] AS latest_value
+        FROM {table} f
+        JOIN companies c ON c.cik = f.cik
+        WHERE {where}
+        GROUP BY {qname_expr}
+    """
+
 def get_company_concepts(ticker: str, search: str | None = None) -> list[tuple]:
     """distinct concepts a company actually reported, for the mapping UI."""
-    clauses = ["c.ticker = %s", "f.dimensions = '{}'::jsonb"]
+    has_search = bool(search)
     params: list = [ticker.upper()]
-    if search:
-        clauses.append("(f.qname ILIKE %s OR f.local_name ILIKE %s)")
+    if has_search:
         like = f"%{search}%"
         params.extend([like, like])
 
+    numeric_sql = _company_concepts_sql(
+        "numerical", "(f.taxonomy || ':' || f.fname)", "fname", has_search
+    )
+    textual_sql = _company_concepts_sql(
+        "textual", "f.qname", "local_name", has_search, " AND f.dimensions = '{}'::jsonb"
+    )
+    sql = f"""
+        SELECT * FROM (
+            {numeric_sql}
+            UNION ALL
+            {textual_sql}
+        ) concepts
+        ORDER BY fact_count DESC, qname
+    """
+
     with get_cursor(write=False) as cursor:
-        cursor.execute(
-            f"""
-            SELECT
-                f.qname,
-                MIN(f.local_name) AS local_name,
-                COUNT(*) AS fact_count,
-                (ARRAY_AGG(f.value ORDER BY
-                    COALESCE(f.end_date, f.instant_date, f.start_date) DESC NULLS LAST
-                ))[1] AS latest_value
-            FROM facts f
-            JOIN companies c ON c.cik = f.cik
-            WHERE {" AND ".join(clauses)}
-            GROUP BY f.qname
-            ORDER BY fact_count DESC, f.qname
-            """,
-            params,
-        )
+        cursor.execute(sql, params + params)
         return cursor.fetchall()
 
 

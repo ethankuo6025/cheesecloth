@@ -8,12 +8,14 @@ from arelle.api.Session import Session
 from arelle.RuntimeOptions import RuntimeOptions
 from psycopg import Connection
 from models import (
-    ParsedFact,
+    TextualFact,
     Filing,
+    NumericalFact,
     PeriodType,
     SECFilingParserError,
     TickerNotFoundError,
     FilingFetchError,
+    NumericalFetchError,
 )
 import config
 import rate_limiter
@@ -193,6 +195,78 @@ class SECFilingParser:
 
         return filings[:max_filings] if max_filings and max_filings < len(filings) else filings
 
+    def _parse_date(self, value: str | None) -> date | None:
+        return date.fromisoformat(value) if value else None
+
+    def _build_numerical_fact(
+        self,
+        ticker: str,
+        cik: str,
+        taxonomy: str,
+        tag: str,
+        unit: str,
+        entry: Any,
+    ) -> NumericalFact | None:
+        """turn one company-facts unit entry into a NumericalFact, or None if unusable."""
+        if not isinstance(entry, dict):
+            return None
+
+        end = entry.get("end")
+        val = entry.get("val")
+        accn = entry.get("accn")
+        if end is None or val is None or not accn:
+            return None
+
+        start = entry.get("start")
+        period_type = PeriodType.DURATION if start else PeriodType.INSTANT
+
+        return NumericalFact(
+            ticker=ticker,
+            cik=cik,
+            accession_number=accn,
+            taxonomy=taxonomy,
+            fname=tag,
+            unit=unit,
+            period_type=period_type,
+            value=str(val),
+            instant_date=self._parse_date(end) if period_type is PeriodType.INSTANT else None,
+            start_date=self._parse_date(start),
+            end_date=self._parse_date(end),
+            fiscal_year=entry.get("fy"),
+            fiscal_period=entry.get("fp"),
+            form=entry.get("form"),
+            filed_date=self._parse_date(entry.get("filed")),
+        )
+
+    def get_numerical_facts(self, ticker: str) -> list[NumericalFact]:
+        """
+        fetch every numeric fact SEC's Company Facts API has compiled for `ticker`,
+        across every filing the company has ever submitted.
+        """
+        ticker = ticker.upper()
+        cik = self._get_cik(ticker)
+        raw = self._get_json(config.SEC_COMPANY_FACTS_URL.format(cik=cik))
+
+        if not isinstance(raw, dict) or not isinstance(raw.get("facts"), dict):
+            raise NumericalFetchError(f"Unexpected company facts payload for CIK {cik}.")
+
+        facts: list[NumericalFact] = []
+        for taxonomy, concepts in raw["facts"].items():
+            if not isinstance(concepts, dict):
+                continue
+            for tag, concept in concepts.items():
+                units = concept.get("units") if isinstance(concept, dict) else None
+                if not isinstance(units, dict):
+                    continue
+                for unit, entries in units.items():
+                    if not isinstance(entries, list):
+                        continue
+                    for entry in entries:
+                        fact = self._build_numerical_fact(ticker, cik, taxonomy, tag, unit, entry)
+                        if fact is not None:
+                            facts.append(fact)
+
+        return facts
 
     def _extract_qname(self, fact) -> tuple[str, str, str]:
         concept = getattr(fact, "concept", None)
@@ -207,17 +281,6 @@ class SECFilingParser:
 
     def _extract_value(self, fact) -> str | None:
         return None if getattr(fact, "isNil", False) else getattr(fact, "value", None)
-
-    def _extract_decimals(self, fact) -> int | None:
-        decimals = None
-        raw_dec = getattr(fact, "decimals", None)
-        if raw_dec is not None and raw_dec != "INF":
-            try:
-                decimals = int(raw_dec)
-            except (ValueError, TypeError):
-                pass
-
-        return decimals
 
     def _extract_unit(self, fact) -> str | None:
         unit_str = None
@@ -271,11 +334,10 @@ class SECFilingParser:
                     dimensions[k] = str(dim_v)
         return dimensions
 
-    def _parse_fact(self, fact, ticker: str, cik: str, accession_number: str) -> ParsedFact:
-        """parse a single arelle fact into a parsedfact."""
+    def _parse_textual_fact(self, fact, ticker: str, cik: str, accession_number: str) -> TextualFact:
+        """parse a single arelle fact into a TextualFact."""
         qname_str, namespace, local_name = self._extract_qname(fact)
         value = self._extract_value(fact)
-        decimals = self._extract_decimals(fact)
         unit_str = self._extract_unit(fact)
 
         ctx = getattr(fact, "context", None)
@@ -285,7 +347,7 @@ class SECFilingParser:
         period_type, instant_date, start_date, end_date = self._extract_period(ctx)
         dimensions = self._extract_dimensions(ctx)
 
-        return ParsedFact(
+        return TextualFact(
             ticker=ticker,
             cik=cik,
             accession_number=accession_number,
@@ -298,7 +360,6 @@ class SECFilingParser:
             start_date=start_date,
             end_date=end_date,
             unit=unit_str,
-            decimals=decimals,
             dimensions=dimensions,
         )
 
@@ -322,7 +383,7 @@ class SECFilingParser:
         filing: Filing,
         ticker: str,
         cik: str,
-    ) -> list[ParsedFact]:
+    ) -> list[TextualFact]:
         """parse a filing and return all facts, both numeric and textual."""
         accession_number = filing.accession_number
         filename = filing.entry_file
@@ -338,10 +399,10 @@ class SECFilingParser:
                 if not models:
                     raise SECFilingParserError(f"No models loaded from {url}")
 
-            parsed_facts: list[ParsedFact] = []
+            parsed_facts: list[TextualFact] = []
             for fact in models[0].factsInInstance:
                 try:
-                    parsed = self._parse_fact(fact, ticker, cik, accession_number)
+                    parsed = self._parse_textual_fact(fact, ticker, cik, accession_number)
                     if parsed.value is not None: 
                         parsed_facts.append(parsed)
                 except SECFilingParserError as e:
