@@ -23,6 +23,29 @@ def update_ticker(
     return store_numerical_facts(parser.conn, facts, batch_size=batch_size)
 
 
+def update_tickers(
+    tickers: Sequence[str],
+    max_retries: int = 3,
+    timeout: float = 30.0,
+) -> tuple[int, int]:
+    """
+    run the quantitative Company Facts update for each ticker in `tickers`.
+    opens its own DB connection and parser session. callable directly from
+    another program, not just via main()'s CLI.
+    """
+    total_upserted = total_failed = 0
+    with get_connection() as conn:
+        with open_parser(conn, max_retries=max_retries, timeout=timeout) as parser:
+            for ticker in tickers:
+                try:
+                    upserted, failed = update_ticker(parser, ticker)
+                    total_upserted += upserted
+                    total_failed += failed
+                    print(f"[{ticker}] upserted={upserted} failed={failed}")
+                except SECFilingParserError:
+                    print(f"[{ticker}] not found in SEC EDGAR. skipping.")
+    return total_upserted, total_failed
+
 def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO)
 
@@ -54,7 +77,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
 
-    # resolve ticker set from all sources.
+    # resolve ticker set from all sources
     try:
         results: list[str] = []
 
@@ -77,20 +100,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     logger.info(" Updating %d ticker(s): %s", len(tickers), ", ".join(tickers))
 
-    total_upserted = 0
-    total_failed = 0
-    with get_connection() as conn:
-        with open_parser(conn, max_retries=args.max_retries, timeout=args.timeout) as parser:
-            for ticker in tickers:
-                try:
-                    upserted, failed = update_ticker(parser, ticker)
-                    total_upserted += upserted
-                    total_failed += failed
-                    print(f"[{ticker}] upserted={upserted} failed={failed}")
-                except SECFilingParserError:
-                    print(f"[{ticker}] not found in SEC EDGAR — skipping.")
+    total_upserted, total_failed = update_tickers(
+        tickers, max_retries=args.max_retries, timeout=args.timeout
+    )
     print(f"\nDone. Total upserted: {total_upserted}, total failed: {total_failed}")
-
 
 if __name__ == "__main__":
     sys.exit(main())
