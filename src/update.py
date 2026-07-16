@@ -44,6 +44,8 @@ def update_tickers(
                     print(f"[{ticker}] upserted={upserted} failed={failed}")
                 except SECFilingParserError:
                     print(f"[{ticker}] not found in SEC EDGAR. skipping.")
+                finally:
+                    conn.commit()
     return total_upserted, total_failed
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -12,7 +12,11 @@ import requests
 # from db_setup import get_connection
 # from models import SECFilingParserError
 from config import nonsec_headers
+from db_setup import get_available_tickers
 from update import update_tickers
+
+SKIP_UPDATED = True  # skip tickers that already have data in the DB
+
 def get_html(url):
     return requests.get(url, headers=nonsec_headers()).text
 
@@ -21,6 +25,13 @@ spy = pd.read_html(StringIO(get_html("https://en.wikipedia.org/wiki/List_of_S%26
 qqq = pd.read_html(StringIO(get_html("https://en.wikipedia.org/wiki/List_of_NASDAQ-100_companies")))[0]["Ticker"].to_list()
 
 tickers = sorted({s.replace(".", "-") for s in spy + qqq})
+
+if SKIP_UPDATED:
+    already_updated = {t for t, _ in get_available_tickers()}
+    skipped = [t for t in tickers if t in already_updated]
+    tickers = [t for t in tickers if t not in already_updated]
+    if skipped:
+        print(f"Skipping {len(skipped)} already-updated ticker(s): {', '.join(skipped)}")
 
 total_upserted, total_failed = update_tickers(tickers)
 
