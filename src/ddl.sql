@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS filings (
     CONSTRAINT filing_key PRIMARY KEY (cik, accession_number)
 );
 
-CREATE TABLE IF NOT EXISTS facts (
+CREATE TABLE IF NOT EXISTS textual (
     id BIGSERIAL PRIMARY KEY,
     fact_hash VARCHAR(64) NOT NULL UNIQUE,
     cik VARCHAR(10) NOT NULL,
@@ -25,12 +25,33 @@ CREATE TABLE IF NOT EXISTS facts (
     instant_date DATE,
     start_date DATE,
     end_date DATE,
-    unit VARCHAR(100),
-    decimals INTEGER,
     dimensions JSONB NOT NULL DEFAULT '{}',
-    CONSTRAINT fk_filing 
-      FOREIGN KEY (cik, accession_number) 
-      REFERENCES filings(cik, accession_number) 
+    CONSTRAINT fk_textual_filing
+      FOREIGN KEY (cik, accession_number)
+      REFERENCES filings(cik, accession_number)
+      ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS numerical (
+    id BIGSERIAL PRIMARY KEY,
+    fact_hash VARCHAR(64) NOT NULL UNIQUE,
+    cik VARCHAR(10) NOT NULL,
+    accession_number VARCHAR(20) NOT NULL,
+    taxonomy VARCHAR(64) NOT NULL,
+    fname VARCHAR(256) NOT NULL,
+    unit VARCHAR(100) NOT NULL,
+    value TEXT,
+    period_type VARCHAR(10) NOT NULL,
+    instant_date DATE,
+    start_date DATE,
+    end_date DATE,
+    fiscal_year INTEGER,
+    fiscal_period VARCHAR(2),
+    form VARCHAR(20),
+    filed_date DATE,
+    CONSTRAINT fk_numerical_filing
+      FOREIGN KEY (cik, accession_number)
+      REFERENCES filings(cik, accession_number)
       ON DELETE CASCADE
 );
 
@@ -52,11 +73,19 @@ CREATE TABLE IF NOT EXISTS metric_mappings (
 );
 
 -- Indexes
-CREATE INDEX IF NOT EXISTS idx_facts_by_company ON facts(cik);
-CREATE INDEX IF NOT EXISTS idx_facts_by_accession ON facts(accession_number);
-CREATE INDEX IF NOT EXISTS idx_facts_qname ON facts(qname);
-CREATE INDEX IF NOT EXISTS idx_facts_end_date ON facts(end_date DESC) WHERE end_date IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_facts_instant_date ON facts(instant_date DESC) WHERE instant_date IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_facts_filing ON facts(cik, accession_number);
+CREATE INDEX IF NOT EXISTS idx_textual_by_company ON textual(cik);
+CREATE INDEX IF NOT EXISTS idx_textual_by_accession ON textual(accession_number);
+CREATE INDEX IF NOT EXISTS idx_textual_qname ON textual(qname);
+CREATE INDEX IF NOT EXISTS idx_textual_end_date ON textual(end_date DESC) WHERE end_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_textual_instant_date ON textual(instant_date DESC) WHERE instant_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_textual_filing ON textual(cik, accession_number);
+
+CREATE INDEX IF NOT EXISTS idx_numerical_by_company ON numerical(cik);
+CREATE INDEX IF NOT EXISTS idx_numerical_by_accession ON numerical(accession_number);
+CREATE INDEX IF NOT EXISTS idx_numerical_qname ON numerical ((taxonomy || ':' || fname));
+CREATE INDEX IF NOT EXISTS idx_numerical_end_date ON numerical(end_date DESC) WHERE end_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_numerical_instant_date ON numerical(instant_date DESC) WHERE instant_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_numerical_filing ON numerical(cik, accession_number);
+
 CREATE INDEX IF NOT EXISTS idx_metric_mappings_lookup
   ON metric_mappings(cik, metric_key, priority);
