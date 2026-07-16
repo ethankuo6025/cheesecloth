@@ -6,7 +6,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.shortcuts import clear as clear_screen
 
-from add import scrape_ticker, open_parser
+from scrape_textual import ingest_textual_ticker, open_parser
 from models import TickerNotFoundError
 from db_setup import get_available_tickers, get_connection
 import query
@@ -130,13 +130,16 @@ def _prompt_and_scrape_ticker() -> str | None:
     print(f"\n  Scraping SEC filings for {ticker} - this may take a moment...")
 
     try:
-        upserted, failed = scrape_ticker(parser, ticker, ("10-K", "10-Q"))  # type:ignore
+        upserted, failed = ingest_textual_ticker(parser, ticker, ("10-K", "10-Q"))  # type:ignore
     except TickerNotFoundError:
         print(f"  '{ticker}' was not found in SEC EDGAR. Check the ticker symbol.")
+        parser.conn.commit()  # type:ignore
         return None
     except Exception as exc:
         print(f"   Scrape failed: {exc}")
+        parser.conn.commit()  # type:ignore
         return None
+    parser.conn.commit()  # type:ignore
 
     if upserted == 0 and failed == 0:
         print(f"  No filings found for '{ticker}'. Check the ticker symbol.")

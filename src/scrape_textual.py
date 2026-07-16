@@ -1,4 +1,4 @@
-"""CLI entry point for scraping SEC filings into the database."""
+"""CLI entry point for scraping SEC filings into the database THROUGH ARELLE."""
 import argparse
 import logging
 import sys
@@ -13,7 +13,7 @@ from config import DEFAULT_FILING_TYPES
 logger = logging.getLogger(__name__)
 
 
-def parse_and_store(
+def _ingest_textual_filing_type(
     parser: SECFilingParser,
     ticker: str,
     filing_types: str | set[str] = "10-K",
@@ -21,7 +21,7 @@ def parse_and_store(
     batch_size: int = 500,
 ) -> tuple[int, int]:
     """
-    parse all un-stored filings of the requested type(s) for `ticker` and
+    parse all un-stored filings of a single requested type for `ticker` and
     persist their facts. reuses `parser.conn` for storage so all writes
     participate in one transactional context.
     """
@@ -64,18 +64,19 @@ def parse_and_store(
 
     return total_upserted, total_failed
 
-def scrape_ticker(
+def ingest_textual_ticker(
     parser: SECFilingParser,
     ticker: str,
     filing_types: Sequence[str],
     max_filings: int | None = None,
 ) -> tuple[int, int]:
     """
-    run the full pipeline for one ticker across every requested filing type.
+    run the textual (Arelle) ingest for one ticker across every requested
+    filing type.
     """
     total_upserted = total_failed = 0
     for ftype in filing_types:
-        up, fail = parse_and_store(
+        up, fail = _ingest_textual_filing_type(
             parser,
             ticker=ticker,
             filing_types=ftype,
@@ -83,6 +84,31 @@ def scrape_ticker(
         )
         total_upserted += up
         total_failed += fail
+    return total_upserted, total_failed
+
+def ingest_textual_tickers(
+    tickers: Sequence[str],
+    filing_types: Sequence[str] = ("10-K", "10-Q"),
+    max_retries: int = 3,
+    timeout: float = 30.0,
+) -> tuple[int, int]:
+    """
+    run the textual (Arelle) ingest for each ticker in `tickers`.
+    opens its own DB connection and parser session. callable directly from
+    another program, not just via main()'s CLI.
+    """
+    total_upserted = total_failed = 0
+    with get_connection() as conn:
+        with open_parser(conn, max_retries=max_retries, timeout=timeout) as parser:
+            for ticker in tickers:
+                try:
+                    upserted, failed = ingest_textual_ticker(parser, ticker, filing_types)
+                    total_upserted += upserted
+                    total_failed += failed
+                    print(f"[{ticker}] upserted={upserted} failed={failed}")
+                except SECFilingParserError:
+                    print(f"[{ticker}] not found in SEC EDGAR. Skipping.")
+                conn.commit()
     return total_upserted, total_failed
 
 def open_parser(conn, max_retries=3, timeout=30.0) -> SECFilingParser:
@@ -152,18 +178,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     logger.info(" Processing %d ticker(s): %s", len(tickers), ", ".join(tickers))
 
-    total_upserted = 0
-    total_failed = 0
-    with get_connection() as conn:
-        with open_parser(conn) as parser:
-            for ticker in tickers:
-                try:
-                    upserted, failed = scrape_ticker(parser, ticker, ("10-K", "10-Q"))
-                    total_upserted += upserted
-                    total_failed += failed
-                    print(f"[{ticker}] upserted={upserted} failed={failed}")
-                except SECFilingParserError:
-                    print(f"[{ticker}] not found in SEC EDGAR — skipping.")
+    total_upserted, total_failed = ingest_textual_tickers(
+        tickers,
+        filing_types=tuple(args.filing_types),
+        max_retries=args.max_retries,
+        timeout=args.timeout,
+    )
     print(f"\nDone. Total upserted: {total_upserted}, total failed: {total_failed}")
 
 if __name__ == "__main__":

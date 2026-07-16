@@ -8,12 +8,12 @@ variance in E/P and S/P among the S&P500 and NASDAQ 100
 from io import StringIO
 import pandas as pd
 import requests
-# from add import open_parser, scrape_ticker
+# from scrape_textual import open_parser, ingest_textual_ticker
 # from db_setup import get_connection
 # from models import SECFilingParserError
 from config import nonsec_headers
 from db_setup import get_available_tickers
-from update import update_tickers
+from update_numerical import ingest_numerical_tickers
 
 SKIP_UPDATED = True  # skip tickers that already have data in the DB
 
@@ -33,6 +33,6 @@ if SKIP_UPDATED:
     if skipped:
         print(f"Skipping {len(skipped)} already-updated ticker(s): {', '.join(skipped)}")
 
-total_upserted, total_failed = update_tickers(tickers)
+total_upserted, total_failed = ingest_numerical_tickers(tickers)
 
 print(f"\nDone. Total upserted: {total_upserted}, total failed: {total_failed}")

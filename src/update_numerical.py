@@ -1,4 +1,4 @@
-"""parser for quantitative facts"""
+"""CLI entry point for scraping SEC filings into the database THROUGH COMPANYFACTS."""
 import argparse
 import logging
 import sys
@@ -8,13 +8,13 @@ from db_setup import get_connection, get_available_tickers
 from models import SECFilingParserError
 from store import store_numerical_facts
 from ticker_loader import TickerLoadError, load_tickers_from_file
-from add import open_parser
+from scrape_textual import open_parser
 from parser import SECFilingParser
 
 logger = logging.getLogger(__name__)
 
 
-def update_ticker(
+def ingest_numerical_ticker(
     parser: SECFilingParser,
     ticker: str,
     batch_size: int = 500,
@@ -23,13 +23,13 @@ def update_ticker(
     return store_numerical_facts(parser.conn, facts, batch_size=batch_size)
 
 
-def update_tickers(
+def ingest_numerical_tickers(
     tickers: Sequence[str],
     max_retries: int = 3,
     timeout: float = 30.0,
 ) -> tuple[int, int]:
     """
-    run the quantitative Company Facts update for each ticker in `tickers`.
+    run the numerical (Company Facts) ingest for each ticker in `tickers`.
     opens its own DB connection and parser session. callable directly from
     another program, not just via main()'s CLI.
     """
@@ -38,14 +38,13 @@ def update_tickers(
         with open_parser(conn, max_retries=max_retries, timeout=timeout) as parser:
             for ticker in tickers:
                 try:
-                    upserted, failed = update_ticker(parser, ticker)
+                    upserted, failed = ingest_numerical_ticker(parser, ticker)
                     total_upserted += upserted
                     total_failed += failed
                     print(f"[{ticker}] upserted={upserted} failed={failed}")
                 except SECFilingParserError:
                     print(f"[{ticker}] not found in SEC EDGAR. skipping.")
-                finally:
-                    conn.commit()
+                conn.commit()
     return total_upserted, total_failed
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -102,7 +101,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     logger.info(" Updating %d ticker(s): %s", len(tickers), ", ".join(tickers))
 
-    total_upserted, total_failed = update_tickers(
+    total_upserted, total_failed = ingest_numerical_tickers(
         tickers, max_retries=args.max_retries, timeout=args.timeout
     )
     print(f"\nDone. Total upserted: {total_upserted}, total failed: {total_failed}")
