@@ -32,13 +32,27 @@ def get_cursor(write: bool = True):
         if conn:
             conn.close()
 
-def get_connection() -> psycopg.Connection:
+def get_connection(
+    host: str | None = None,
+    port: str | None = None,
+    dbname: str | None = None,
+    user: str | None = None,
+    password: str | None = None,
+) -> psycopg.Connection:
+    defaults = config.db_kwargs()
+    kwargs = {
+        "host": host or defaults["host"],
+        "port": port or defaults["port"],
+        "dbname": dbname or defaults["dbname"],
+        "user": user or defaults["user"],
+        "password": password or defaults["password"],
+    }
     try:
-        return psycopg.connect(**config.db_kwargs())
+        return psycopg.connect(**kwargs)
     except Error as e:
         logger.error(
             "Connection error (db=%s, host=%s, port=%s, user=%s): %s",
-            config.DB_NAME, config.DB_HOST, config.DB_PORT, config.DB_USER, e,
+            kwargs["dbname"], kwargs["host"], kwargs["port"], kwargs["user"], e,
         )
         raise
 
@@ -48,7 +62,7 @@ def create_database() -> tuple[int, str]:
     SUCCESSFUL = "cheesecloth database has been setup successfully."
     conn = None
     try:
-        conn = get_connection()
+        conn = get_connection(dbname="postgres")
         conn.autocommit = True
         with conn.cursor() as cursor:
             cursor.execute(
@@ -95,7 +109,7 @@ def setup_database() -> int:
     """
     code, msg = create_database()
     print(msg)
-    if code == 1:  # could not create or connect — nothing more to do
+    if code == 1:  # could not create or connect
         return code
 
     code, msg = init_schema()
@@ -114,7 +128,7 @@ def setup_database() -> int:
 def reset_database() -> bool:
     """drops ALL tables and recreate. warning: deletes all data."""
     try:
-        conn = get_connection()
+        conn = get_connection(dbname="postgres")
         conn.autocommit = True
         with conn.cursor() as cursor:
             cursor.execute(
@@ -138,8 +152,7 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--reset":
         confirm = input("This will DELETE ALL DATA from cheesecloth. Type 'yes I understand' to confirm: ")
         if confirm == "yes I understand":
-            if create_database():
-                reset_database()
+            reset_database()
         else:
             print("Incorrect response: operation cancelled.")
     else:
