@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import NamedTuple
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -15,6 +14,10 @@ class TickerNotFoundError(SECFilingParserError):
 
 class FilingFetchError(SECFilingParserError):
     """thrown by SECFilingParser._get_json() on http issues."""
+    pass
+
+class NumericalFetchError(SECFilingParserError):
+    """thrown by SECFilingParser.get_numerical_facts() on http issues."""
     pass
 
 class PeriodType(Enum):
@@ -30,7 +33,6 @@ class Fact:
     start_date: date | None
     end_date: date | None
     unit: str | None
-    decimals: int | None
     accession_number: str
 
 @dataclass(frozen=True)
@@ -40,7 +42,7 @@ class Metric:
     format_type: str
 
 @dataclass(frozen=True)
-class ParsedFact:
+class TextualFact:
     ticker: str
     cik: str
     accession_number: str
@@ -53,7 +55,6 @@ class ParsedFact:
     start_date: date | None = None
     end_date: date | None = None
     unit: str | None = None
-    decimals: int | None = None
     dimensions: dict[str, str] = field(default_factory=dict)
 
 @dataclass(frozen=True)
@@ -62,3 +63,21 @@ class Filing:
     accession_number: str
     entry_file: str
     filing_type: str
+
+@dataclass(frozen=True)
+class NumericalFact:
+    ticker: str
+    cik: str
+    accession_number: str
+    taxonomy: str
+    fname: str
+    unit: str
+    period_type: PeriodType
+    value: str | None = None
+    instant_date: date | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    fiscal_year: int | None = None
+    fiscal_period: str | None = None
+    form: str | None = None
+    filed_date: date | None = None

@@ -220,7 +220,13 @@ def _format_fact_rows(raw_rows, format_type: str = "currency") -> list[tuple]:
     """converts raw DB rows into display tuples, formatted per the metric's type."""
     out = []
     for row in raw_rows:
-        _, period_type, value, instant_date, start_date, end_date, unit, decimals, accession = row
+        period_type = row.period_type
+        value = row.value
+        instant_date = row.instant_date
+        start_date = row.start_date
+        end_date = row.end_date
+        unit = row.unit
+        accession = row.accession_number
 
         # build date string
         if period_type == "instant" and instant_date:
