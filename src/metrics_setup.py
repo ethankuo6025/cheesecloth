@@ -19,8 +19,6 @@ SEED_METRICS: list[tuple[str, str, str]] = [
     ("net",                  "Net Income",                         "currency"),
     ("operating",            "Operating Income",                   "currency"),
     ("revenue",              "Revenue",                            "currency"),
-    ("revenue_goods",        "Revenue (Goods)",                    "currency"),
-    ("revenue_services",     "Revenue (Services)",                 "currency"),
     ("risk_factors",         "Risk Factors",                       "text"),
     ("shares_outstanding",   "Shares Outstanding",                 "number"),
     ("stockholders_equity",  "Stockholders' Equity",               "currency"),

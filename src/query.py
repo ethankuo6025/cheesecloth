@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from collections import defaultdict
+from dataclasses import replace
+from datetime import date
+from statistics import median
+
 from db_setup import get_cursor
 from models import Fact, Metric
 
@@ -72,16 +77,135 @@ ORDER BY COALESCE(end_date, instant_date, start_date) DESC NULLS LAST
 _NUMERICAL_FETCH_SQL = _ranked_fact_sql("numerical", "(f.taxonomy || ':' || f.fname)", "fname")
 _TEXTUAL_FETCH_SQL = _ranked_fact_sql("textual", "f.qname", "local_name", "AND f.dimensions = '{}'::jsonb")
 
+
+SPLIT_REF_QNAMES = (
+    "us-gaap:WeightedAverageNumberOfDilutedSharesOutstanding",
+    "us-gaap:WeightedAverageNumberOfSharesOutstandingBasic",
+    "us-gaap:WeightedAverageNumberOfShareOutstandingBasicAndDiluted",
+)
+
+SPLIT_REF_SQL = """
+    SELECT f.accession_number, f.filed_date, f.start_date, f.end_date, f.value
+    FROM numerical f
+    JOIN companies c ON c.cik = f.cik
+    WHERE c.ticker = %s
+      AND (f.taxonomy || ':' || f.fname) = %s
+      AND f.start_date IS NOT NULL
+      AND f.end_date IS NOT NULL
+      AND f.filed_date IS NOT NULL
+"""
+
+
+def get_split_factors(ticker: str) -> dict[str, float]:
+    """
+    per-filing split-adjustment factors that normalize every filing's per-share
+    basis onto the *latest* filing's basis, derived purely from overlapping
+    share-count facts (no external split data needed).
+
+    the same historical period reported in two filings differs only by the
+    stock splits that happened between them, so the ratio of its share counts
+    is exactly that cumulative split factor. we chain those ratios across
+    overlapping filings back to the newest one (factor 1.0).
+
+    returns {accession_number: factor}. for a SHARE COUNT multiply the value by
+    the factor; for a PER-SHARE value divide by it. accessions absent from the
+    map should be treated as 1.0 (unadjusted).
+    """
+    ticker = ticker.upper()
+    rows: list[tuple] = []
+    with get_cursor(write=False) as cursor:
+        for qname in SPLIT_REF_QNAMES:
+            cursor.execute(SPLIT_REF_SQL, (ticker, qname))
+            rows = cursor.fetchall()
+            if rows:
+                break
+    if not rows:
+        return {}
+
+    filed: dict[str, date] = {}
+    raw: dict[str, dict[tuple, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for accn, filed_date, start, end, value in rows:
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            continue
+        if v <= 0:
+            continue
+        filed[accn] = filed_date
+        raw[accn][(start, end)].append(v)
+
+    series: dict[str, dict[tuple, float]] = {
+        accn: {period: median(vals) for period, vals in periods.items()}
+        for accn, periods in raw.items()
+    }
+    if not series:
+        return {}
+
+    # process newest-filed first; anchor it at 1.0 and chain older ones onto it.
+    accns = sorted(series, key=lambda a: (filed[a], a), reverse=True)
+    factor: dict[str, float] = {accns[0]: 1.0}
+    processed: list[str] = [accns[0]]
+
+    for a in accns[1:]:
+        implied: list[float] = []
+        for b in processed:
+            shared = set(series[a]) & set(series[b])
+            ratios = [series[b][p] / series[a][p] for p in shared if series[a][p] > 0]
+            if ratios:
+                implied.append(factor[b] * median(ratios))
+        # fall back to the nearest newer filing's basis when nothing overlaps
+        # (e.g. a lone quarterly period): assume no split in the gap.
+        factor[a] = median(implied) if implied else factor[processed[-1]]
+        processed.append(a)
+
+    return factor
+
+
+def _split_adjust_value(value, unit: str | None, factor: float):
+    """re-express one value on the latest split basis, by unit type."""
+    if factor == 1.0 or value is None:
+        return value
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return value
+    u = (unit or "").lower()
+    if u == "shares":
+        return v * factor           # more shares outstanding post-split
+    if u.endswith("/shares"):
+        return v / factor           # e.g. USD/shares (EPS) shrinks post-split
+    return value                    # dollars, ratios, pure numbers: unaffected
+
+
+def _apply_split_factors(ticker: str, facts: list[Fact]) -> list[Fact]:
+    """normalize per-share and share-count facts onto the latest split basis."""
+    if not facts:
+        return facts
+    factors = get_split_factors(ticker)
+    if not factors:
+        return facts
+
+    out: list[Fact] = []
+    for f in facts:
+        factor = factors.get(f.accession_number, 1.0)
+        new_val = _split_adjust_value(f.value, f.unit, factor)
+        out.append(f if new_val is f.value else replace(f, value=new_val))
+    return out
+
+
 def query_facts(
     ticker: str,
     qnames: list[str],
     query_type: str,
     fact_kind: str = "numerical",
+    adjust_splits: bool = True,
 ) -> list[Fact]:
     """
     fetch facts for a ticker, picking the highest-priority qname per filing,
     filtering by period type, deduplicating, and sorting by date. `fact_kind`
-    selects whether to read from numerical or textual.
+    selects whether to read from numerical or textual. when `adjust_splits` is
+    set, numerical per-share/share-count values are normalized onto the latest
+    filing's stock-split basis so the series is comparable across years.
     """
     sql = _NUMERICAL_FETCH_SQL if fact_kind == "numerical" else _TEXTUAL_FETCH_SQL
     with get_cursor(write=False) as cursor:
@@ -89,9 +213,13 @@ def query_facts(
             sql,
             (qnames, ticker.upper(), qnames, query_type, query_type, query_type),
         )
-        return [Fact(*row) for row in cursor.fetchall()]
+        facts = [Fact(*row) for row in cursor.fetchall()]
 
-def resolve(ticker: str, key: str, query_type: str) -> list[Fact]:
+    if adjust_splits and fact_kind == "numerical":
+        facts = _apply_split_factors(ticker, facts)
+    return facts
+
+def resolve(ticker: str, key: str, query_type: str, adjust_splits: bool = True) -> list[Fact]:
     """resolve a metric to Fact objects using a specific company's configured mappings."""
     metric = get_metric(key)
     if metric is None:
@@ -102,7 +230,7 @@ def resolve(ticker: str, key: str, query_type: str) -> list[Fact]:
         return []
 
     fact_kind = "textual" if metric.format_type == "text" else "numerical"
-    return query_facts(ticker, qnames, query_type, fact_kind=fact_kind)
+    return query_facts(ticker, qnames, query_type, fact_kind=fact_kind, adjust_splits=adjust_splits)
 
 
 def get_cik_for_ticker(ticker: str) -> str | None:
