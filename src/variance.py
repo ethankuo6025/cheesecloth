@@ -1,7 +1,8 @@
 """
 variance in E/P and S/P among the S&P500 and NASDAQ 100
-2. Grab their total revenue, share count, EPS, and share price (average for last 8 quarters?)
-3. Compile into dataframe, average row wise, calculate TR/(SP*SC) and EPS/SP
+2. Grab their total revenue, net income, FCF, and market cap (average for last 8 quarters?)
+    share price * share count = market cap
+3. Compile into dataframe, average row wise, E/P, S/P, and FCF/P. do trailing 8 quarters average or something
 4. analyze change over time
 """
 

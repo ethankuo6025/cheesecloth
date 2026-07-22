@@ -3,7 +3,7 @@ import logging
 import shutil
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.completion import WordCompleter, FuzzyWordCompleter, NestedCompleter
 from prompt_toolkit.shortcuts import clear as clear_screen
 
 from scrape_textual import ingest_textual_ticker, open_parser
@@ -13,8 +13,6 @@ import query
 from models import Metric
 
 logger = logging.getLogger(__name__)
-
-BASE_COMMANDS = ["ticker", "mode", "map", "metrics", "help", "quit"]
 
 ALLOWED_FORMATS = {"percentage", "ratio", "currency", "number", "text"}
 
@@ -68,11 +66,31 @@ def _short_value(val) -> str:
     s = str(val).strip().replace("\n", " ")
     return (s[:18] + "…") if len(s) > 18 else s
 
-def _get_available_commands() -> list[str]:
-    """returns commands available based on current state."""
+def _build_command_completer() -> NestedCompleter:
+    """
+    nested completer for the main prompt: completes the command word, then its
+    arguments after a space (e.g. `mode ` -> annual/quarterly/all, `map ` ->
+    metric keys, `ticker ` -> known symbols). rebuilt each prompt so it tracks
+    the active ticker, catalog, and ticker list.
+    """
+    metric_keys = {m.key: None for m in _get_catalog()}
+    ticker_opts: dict[str, None] = {t: None for t, _ in get_available_tickers()}
+    ticker_opts["add"] = None
+
+    nested: dict[str, object] = {
+        "ticker": ticker_opts,
+        "mode": {"annual": None, "quarterly": None, "all": None},
+        "metrics": None,
+        "help": None,
+        "quit": None,
+    }
     if _active_ticker:
-        return BASE_COMMANDS + [m.key for m in _get_catalog()]
-    return BASE_COMMANDS
+        nested["map"] = dict(metric_keys)      # `map <metric>`
+        nested.update(metric_keys)             # bare metric key = query
+    else:
+        nested["map"] = None
+
+    return NestedCompleter.from_nested_dict(nested)
 
 def _render():
     clear_screen()
@@ -282,42 +300,61 @@ def _format_fact_rows(raw_rows, format_type: str = "currency") -> list[tuple]:
 
     return out
 
-def _cmd_ticker() -> list[str]:
-    """select a ticker to work with for this session."""
+def _cmd_ticker(arg: str = "") -> list[str]:
+    """select a ticker to work with for this session (inline `ticker <sym>` or a prompt)."""
+    global _active_ticker
+    arg = arg.strip()
+
+    if arg:
+        if arg.lower() == "add":
+            ticker = _prompt_and_scrape_ticker()
+            if not ticker:
+                return ["No ticker added."]
+            _active_ticker = ticker
+            return [f"Active ticker set to {ticker}. Type 'help' for commands."]
+        available = {t.upper() for t, _ in get_available_tickers()}
+        if arg.upper() in available:
+            _active_ticker = arg.upper()
+            return [f"Active ticker set to {_active_ticker}. Type 'help' for commands."]
+        return [
+            f"'{arg.upper()}' isn't in the database.",
+            "Type 'ticker add' to scrape it, or 'ticker' to list what's available.",
+        ]
+
     ticker = _prompt_ticker_selection()
     if not ticker:
         return ["No ticker selected."]
-
-    global _active_ticker
     _active_ticker = ticker
     return [f"Active ticker set to {ticker}. Type 'help' for commands."]
 
 
-def _cmd_mode() -> list[str]:
+MODE_ALIASES = {
+    "1": "annual", "2": "quarterly", "3": "all",
+    "annual": "annual", "quarterly": "quarterly", "all": "all",
+    "a": "annual", "q": "quarterly",
+}
+
+def _mode_help(note: str | None = None) -> list[str]:
+    lines = [note] if note else []
+    lines += [
+        "MODE — how periods are filtered in queries",
+        f"  Current: {_query_mode.upper()}",
+        "  Usage: mode <annual|quarterly|all>",
+        "    annual     only full-year periods",
+        "    quarterly  only quarterly periods",
+        "    all        every period",
+    ]
+    return lines
+
+def _cmd_mode(arg: str = "") -> list[str]:
     global _query_mode
-
-    print("\n── Query Mode ──")
-    print(f"  Current: {_query_mode.upper()}")
-    print("  1. annual  2. quarterly  3. all")
-
-    mode_completer = WordCompleter(
-        ["annual", "quarterly", "all", "1", "2", "3"],
-        ignore_case=True,
-    )
-
-    val = form_session.prompt("  Select: ", completer=mode_completer).strip().lower()  # type: ignore
-
-    modes = {
-        "1": "annual", "2": "quarterly", "3": "all",
-        "annual": "annual", "quarterly": "quarterly", "all": "all",
-        "a": "annual", "q": "quarterly"
-    }
-
-    if val in modes:
-        _query_mode = modes[val]
+    arg = arg.strip().lower()
+    if not arg:
+        return _mode_help()
+    if arg in MODE_ALIASES:
+        _query_mode = MODE_ALIASES[arg]
         return [f"Query mode: {_query_mode.upper()}"]
-
-    return [f"Invalid. Mode unchanged: {_query_mode.upper()}"]
+    return _mode_help(f"Invalid mode '{arg}'. Mode unchanged.")
 
 def _cmd_query(metric: Metric) -> list[str]:
     """show queried facts for the active ticker, formatted per the catalog."""
@@ -344,7 +381,7 @@ def _cmd_query(metric: Metric) -> list[str]:
     lines += ["", f"  {len(rows)} record(s)."]
     return lines
 
-def _cmd_metrics() -> list[str]:
+def _cmd_metrics(arg: str = "") -> list[str]:
     """list the metric catalog, marking which are mapped for the active ticker."""
     catalog = _get_catalog()
     lines = ["METRIC CATALOG", ""]
@@ -420,33 +457,45 @@ def _select_metric_for_mapping() -> Metric | None:
     return None
 
 def _browse_and_select_concepts(ticker: str, metric: Metric) -> list[str]:
-    """prompt for concepts to map, with qname autocomplete."""
+    """pick concepts to map, one at a time, with a metadata-rich fuzzy dropdown."""
     concepts = query.get_company_concepts(ticker)
     if not concepts:
         print("  This company has no reported concepts. Scrape it first.")
         return []
 
-    all_qnames = [q for q, *_ in concepts]
-    completer = WordCompleter(all_qnames, ignore_case=True, sentence=True)
+    all_qnames: list[str] = []
+    meta: dict[str, str] = {}
+    for qname, local_name, fact_count, latest_value in concepts:
+        all_qnames.append(qname)
+        meta[qname] = f"{local_name}  ·  {fact_count}×  ·  {_short_value(latest_value)}"
 
-    print(f"\n  Type to search concepts for {ticker} — pick which feed '{metric.display_name}'.")
-    print("  Separate multiple with commas. Enter to cancel.")
+    completer = FuzzyWordCompleter(all_qnames, meta_dict=meta)
+    qname_set = set(all_qnames)
 
-    val = form_session.prompt("  concept> ", completer=completer).strip()  # type: ignore
-    if not val:
-        return []
+    print(f"\n  Search concepts for {ticker} to feed '{metric.display_name}'.")
 
     picks: list[str] = []
-    for token in (t.strip() for t in val.split(",") if t.strip()):
-        match = next((q for q in all_qnames if q.lower() == token.lower()), None)
-        if match:
-            picks.append(match)
+    while True:
+        label = f"  concept ({len(picks)} picked)> " if picks else "  concept> "
+        val = form_session.prompt(  # type: ignore
+            label, completer=completer, complete_while_typing=True
+        ).strip()
+        if not val:
+            break
+        if val in qname_set:
+            match = val
         else:
-            print(f"  Unknown concept: '{token}'.")
-            return []
+            match = next((q for q in all_qnames if q.lower() == val.lower()), None)
+        if match is None:
+            print(f"  No concept matches '{val}'. Keep typing to search, or Enter to finish.")
+            continue
+        if match in picks:
+            print(f"  '{match}' already selected.")
+            continue
+        picks.append(match)
+        print(f"  + {match}   ({meta[match]})")
 
-    seen: set[str] = set()
-    return [q for q in picks if not (q in seen or seen.add(q))]
+    return picks
 
 def _map_metric(metric: Metric) -> list[str]:
     """view/add/remove mappings for one metric on the active ticker."""
@@ -493,31 +542,48 @@ def _map_metric(metric: Metric) -> list[str]:
         else:
             print("  Unknown. Use 'add', 'rm <n>', or Enter to go back.")
 
-def _cmd_map() -> list[str]:
-    """entry point for the per-company concept-to-metric mapping workflow."""
+def _cmd_map(arg: str = "") -> list[str]:
+    """entry point for the per-company concept-to-metric mapping workflow.
+
+    `map <metric>` jumps straight into that metric; bare `map` shows the picker.
+    """
     if not _active_ticker:
         return ["No ticker selected. Run 'ticker' first."]
+
+    arg = arg.strip().lower()
+    if arg:
+        catalog = _catalog_map()
+        metric = catalog.get(arg)
+        if metric is None:
+            matches = sorted(k for k in catalog if k.startswith(arg))
+            if len(matches) == 1:
+                metric = catalog[matches[0]]
+            elif len(matches) > 1:
+                return [f"Ambiguous metric: {', '.join(matches)}"]
+            else:
+                return [f"Unknown metric '{arg}'. Type 'metrics' to list them."]
+        return _map_metric(metric)
 
     metric = _select_metric_for_mapping()
     if metric is None:
         return ["Mapping cancelled."]
     return _map_metric(metric)
 
-def _cmd_help() -> list[str]:
+def _cmd_help(arg: str = "") -> list[str]:
     lines = [
-        "COMMANDS",
-        "  ticker  - Select or add a ticker",
-        "  mode    - Toggle annual/quarterly/all",
-        "  map     - Map this company's reported concepts onto metrics",
-        "  metrics - List the metric catalog (✓ = mapped for this ticker)",
-        "  help    - Show this help",
-        "  quit    - Exit",
+        "COMMANDS  (Tab completes commands and their arguments)",
+        "  ticker [SYM]          - Select a ticker; 'ticker add' to scrape a new one",
+        "  mode <a|q|all>        - Set period filter (annual/quarterly/all)",
+        "  map [METRIC]          - Map reported concepts onto a metric",
+        "  metrics               - List the metric catalog (✓ = mapped for this ticker)",
+        "  help                  - Show this help",
+        "  quit                  - Exit",
         "",
     ]
     if _active_ticker:
         mapped = {row[0] for row in query.get_mappings_for_ticker(_active_ticker)}
         ready = [m.key for m in _get_catalog() if m.key in mapped]
-        lines += ["QUERIES (type a metric key)"]
+        lines += ["QUERIES (type a metric key directly)"]
         if ready:
             lines += ["  Mapped: " + ", ".join(ready)]
         else:
@@ -537,39 +603,55 @@ BASE_COMMAND_MAP = {
     "help":    _cmd_help,
 }
 
-def _process_command(cmd: str) -> list[str]:
-    cmd = cmd.strip().lower()
-    if not cmd:
-        return []
-
-    if cmd in ("quit", "exit", "q"):
-        raise KeyboardInterrupt
-
-    if cmd in BASE_COMMAND_MAP:
-        return BASE_COMMAND_MAP[cmd]()
-
+def _resolve_command(token: str) -> tuple[str | None, str | None]:
+    """
+    resolve a command token to a canonical command/metric key via exact then
+    unique-prefix match. returns (name, error): exactly one of the two is set,
+    or both None when the token matches nothing.
+    """
+    token = token.lower()
     catalog = _catalog_map()
-    if cmd in catalog:
-        if not _active_ticker:
-            return ["No ticker selected. Run 'ticker' first."]
-        return _cmd_query(catalog[cmd])
+    if token in BASE_COMMAND_MAP or token in catalog:
+        return token, None
 
-    # prefix matching
     candidates = set(BASE_COMMAND_MAP)
     if _active_ticker:
         candidates |= set(catalog)
 
-    matches = sorted(c for c in candidates if c.startswith(cmd))
+    matches = sorted(c for c in candidates if c.startswith(token))
     if len(matches) == 1:
-        return _process_command(matches[0])
+        return matches[0], None
     if len(matches) > 1:
-        return [f"Ambiguous: {', '.join(matches)}"]
+        return None, f"Ambiguous: {', '.join(matches)}"
+    return None, None
 
-    # a query metric was typed without an active ticker
-    if any(k.startswith(cmd) for k in catalog) and not _active_ticker:
+def _process_command(raw: str) -> list[str]:
+    raw = raw.strip()
+    if not raw:
+        return []
+
+    parts = raw.split(maxsplit=1)
+    token = parts[0].lower()
+    arg = parts[1].strip() if len(parts) > 1 else ""
+
+    if token in ("quit", "exit", "q"):
+        raise KeyboardInterrupt
+
+    name, err = _resolve_command(token)
+    if err:
+        return [err]
+    if name is None:
+        if not _active_ticker and any(k.startswith(token) for k in _catalog_map()):
+            return ["No ticker selected. Run 'ticker' first."]
+        return [f"Unknown: '{token}'. Type 'help'."]
+
+    if name in BASE_COMMAND_MAP:
+        return BASE_COMMAND_MAP[name](arg)
+
+    # otherwise it's a metric key -> query
+    if not _active_ticker:
         return ["No ticker selected. Run 'ticker' first."]
-
-    return [f"Unknown: '{cmd}'. Type 'help'."]
+    return _cmd_query(_catalog_map()[name])
 
 def _main():
     global cmd_session, form_session, parser
@@ -598,10 +680,11 @@ def _main():
 
         while True:
             try:
-                available_cmds = _get_available_commands()
-                completer = WordCompleter(available_cmds, ignore_case=True, sentence=True)
+                completer = _build_command_completer()
 
-                raw = cmd_session.prompt("\n> ", completer=completer).strip()
+                raw = cmd_session.prompt(
+                    "\n> ", completer=completer, complete_while_typing=True
+                ).strip()
                 result = _process_command(raw)
                 if result:
                     _reset_ui()
